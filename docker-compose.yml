@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # 1. The Database
+  db:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: search_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # 2. The Backend (FastAPI)
+  backend:
+    build: ./backend
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/search_db
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  # 3. The Frontend (Next.js)
+  frontend:
+    build: ./frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://your-vps-ip:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

@@ -1,0 +1,9 @@
+-- Enable pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Create an index for Keyword Search (English language)
+CREATE INDEX idx_content_tsvector ON documents USING GIN (to_tsvector('english', content));
+
+-- Create an HNSW index for fast Vector Search
+-- Note: use vector_cosine_ops if using cosine distance
+CREATE INDEX idx_embedding_hnsw ON documents USING hnsw (embedding vector_cosine_ops);
