@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+frontend/node_modules/
+.data/
+backend/.venv/
+pipelines/.venv
+pipelines/pdf_files
+pipelines/html_files
+frontend/.next
+.idea

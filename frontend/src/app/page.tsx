@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import SearchResult from '@/components/SearchResult';
+import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
@@ -25,35 +26,52 @@ export default function SearchPage() {
   };
 
   return (
-    <main className="max-w-4xl mx-auto p-8">
-      <h1 className="text-3xl font-bold mb-8 text-center">Hybrid Document Search</h1>
-      
-      <form onSubmit={handleSearch} className="mb-12">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search documents using natural language..."
-            className="flex-1 p-4 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-          <button 
-            type="submit"
-            className="bg-blue-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-blue-700 transition"
-          >
-            {loading ? 'Searching...' : 'Search'}
-          </button>
-        </div>
-      </form>
+    <div className="min-h-screen bg-[#fcfcfc] text-slate-900 font-sans selection:bg-blue-100">
+      {/* Search Header Section */}
+      <section className={`transition-all duration-500 ease-in-out ${results.length > 0 ? 'pt-12 pb-8' : 'pt-[30vh]'}`}>
+        <div className="max-w-3xl mx-auto px-6">
+          {!results.length && (
+            <h1 className="text-4xl font-light tracking-tight text-center mb-8 text-slate-800">
+              Find <span className="font-semibold text-blue-600">Anything.</span>
+            </h1>
+          )}
+          <form onSubmit={handleSearch} className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            </div>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search documents using natural language..."
+              className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm
+                focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none
+                transition-all duration-200 text-lg"
+            />
+            
+            {loading && (
+              <div className="absolute right-4 top-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+              </div>
+            )}
+          </form>
 
-      <div className="space-y-4">
-        {results.map((result: any) => (
-          <SearchResult key={result.id} result={result} />
-        ))}
-        {!loading && results.length === 0 && query && (
-          <p className="text-center text-gray-500">No documents found matching that query.</p>
-        )}
-      </div>
-    </main>
+        </div>
+      </section>
+      
+      { /* Results Section */ }
+      <section className="max-w-3xl mx-auto px-6 pb-20">
+        <div className="space-y-6">
+          {results.map((result: any, index) => (
+            <div
+              key={result.id}
+              className="animate-in fade-in slide-in-from-bottom-4 duration-500"
+              style={{ animationDelay: `{index * 50}ms` }}
+            >
+              <SearchResult result={result} />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
