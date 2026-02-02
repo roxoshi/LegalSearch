@@ -1,23 +1,28 @@
+import glob
 import json
 import os
 import logging
 from pathlib import Path
-from typing import Iterable, List, Any, Generator
+from typing import List, Any, Generator
 from dotenv import load_dotenv
-import numpy as np
 from sqlalchemy.orm import Session
 from sentence_transformers import SentenceTransformer
 from app.database import SessionLocal, engine
-from app.models import Document, Base
-from sqlalchemy.dialects.postgresql import insert
+from app.models import Document, Base, DocumentChunk
+from app.chunk_generator import RecursiveCharacterTextSplitter
+import sys
+
+# Add parent directory to path to import pipelines
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pipelines.convert_pdf import convert_pdf_to_html
 
 try:
     load_dotenv()
-except Exception as e:
+except Exception:
     print("Error in load .env")
 
-MODEL_NAME = os.getenv("MODEL_NAME", None)
-BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "100"))
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-Embedding-0.6B")
+BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "50"))
 DATA_FILE = Path(os.getenv("DOCUMENTS_FILE", "documents.json"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
@@ -41,11 +46,13 @@ def load_model() -> SentenceTransformer:
 def load_documents(file_path: Path) -> List[dict]:
     if not file_path.exists():
         raise FileNotFoundError(f"Data file not found: {file_path}")
-
     logger.info("Loading documents from %s", file_path)
-
-    with file_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    files = glob.glob(f"{file_path}/*.json")
+    documents: List[dict] = []
+    for file in files:
+        with Path(file).open("r", encoding="utf-8") as f:
+            documents.append(json.load(f))
+    return documents
 
 # Ingestion logic
 def chunked(iterable: List[dict], size: int) -> Generator[list[dict], Any, None]:
@@ -57,23 +64,71 @@ def ingest_batch(
     model: SentenceTransformer,
     batch: List[dict],
 ) -> None:
-    contents = [doc["content"] for doc in batch]
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=4000,
+        chunk_overlap=600,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+    try:
+        for doc_data in batch:
+            # Try to find corresponding PDF
+            # Assuming file_name is available or can be derived. 
+            # If JSON has 'source' or 'file_name', use it. 
+            # Fallback: check if 'case_id' matches filename.
+            
+            display_html = None
+            
+            # Construct PDF path (adjust based on actual PDF location)
+            pdf_name = f"{doc_data['case_id']}.pdf" # Example assumption
+            pdf_path = Path("/app/.data/gst_pdfs") / pdf_name
+            
+            if not pdf_path.exists():
+                # Try finding by title or other metadata if needed, 
+                # or maybe the JSON has 'filename' field? 
+                # For now, trying case_id and title sanitization
+                pass
 
-    embeddings = model.encode(
-        contents,
-        show_progress_bar=False,
-    ).tolist()
+            if pdf_path.exists():
+                logger.info(f"Converting PDF for {doc_data['case_id']}")
+                display_html = convert_pdf_to_html(pdf_path)
+            
+            # If conversion failed or no PDF, fallback to simple text formatting
+            if not display_html:
+                 display_html = f"<p>{doc_data['text_content']}</p>"
 
-    rows = [
-        {
-        "title": doc["title"],
-        "content": doc["content"],
-        "embedding": embeddings[idx]
-        }
-        for idx, doc in enumerate(batch)
-    ]
+            new_doc = Document(
+                title=doc_data["title"],
+                petitioner=doc_data.get("petitioner", "N/A"),
+                respondent=doc_data.get("respondent", "N/A"), 
+                judge=doc_data.get("judge", "N/A"),
+                citation=doc_data.get("citation", "N/A"),
+                decision_date=doc_data.get("decision_date", "N/A"),
+                court=doc_data.get("court", "N/A"),
+                case_id=doc_data["case_id"],
+                content=doc_data["text_content"],
+                display_content=display_html
+            )
+            db.add(new_doc)
+            db.flush()
+            text_chunks = text_splitter.split_text(doc_data["text_content"])
+            chunk_embeddings = model.encode(text_chunks, show_progress_bar=False).tolist()
+            chunk_objects = [
+                DocumentChunk(
+                    document_id=new_doc.id,
+                    chunk_content=text,
+                    embedding=embedding
+                )
+                for text, embedding in zip(text_chunks, chunk_embeddings)
+            ]
 
-    db.execute(insert(Document), rows)
+            db.add_all(chunk_objects)
+        db.commit()
+        logger.info(f"Successfully commited batch of {len(batch)} documents")
+    
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error processing batch: {e}")
+        raise
 
 def ingest_documents() -> None:
     init_database()
@@ -86,13 +141,20 @@ def ingest_documents() -> None:
 
     db: Session = SessionLocal()
 
-    try:
-        for idx, batch in enumerate(chunked(documents, BATCH_SIZE), start=1):
-            ingest_batch(db, model, batch)
-            db.commit()
+    # Check if documents already exist
+    existing_count = db.query(Document).count()
+    if existing_count > 0:
+        logger.info(f"Database already contains {existing_count} documents. Skipping ingestion.")
+        db.close()
+        return
 
-            processed = min(idx * BATCH_SIZE, total)
-            logger.info("Indexed %d / %d documents", processed, total)
+
+    try:
+        for i in range(0, total, BATCH_SIZE):
+            batch = documents[i : i + BATCH_SIZE]
+            ingest_batch(db, model, batch)
+            logger.info(f"Processed {i + len(batch)} / {total} documents")
+        db.commit()
     except Exception:
         logger.exception("Ingestion failed, rolling back transaction")
         db.rollback()

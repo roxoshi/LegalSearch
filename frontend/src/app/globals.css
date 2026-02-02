@@ -1,1 +1,14 @@
 @import "tailwindcss";
+
+.judgment-content p {
+  margin-bottom: 1.2em;
+}
+
+.judgment-content .indented {
+  text-indent: 2em;
+}
+
+.judgment-content strong {
+  font-weight: 600;
+  color: #1a202c;
+}

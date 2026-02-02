@@ -1,12 +1,15 @@
 [project]
-name = "legalsearchpipelines"
+name = "legalsearchetl"
 version = "0.1.0"
-description = "Add your description here"
+description = "ETL service for LegalSearch"
 requires-python = ">=3.13"
 dependencies = [
-   "beautifulsoup4",
-   "pymupdf>=1.26.7",
-   "tools>=1.0.17",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "sentence-transformers",
+    "beautifulsoup4",
+    "pymupdf", 
+    "python-dotenv",
 ]
 
 [tool.hatch.build.targets.wheel]

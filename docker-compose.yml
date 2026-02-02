@@ -11,12 +11,15 @@ services:
       POSTGRES_DB: search_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
 
   # 2. The Backend (FastAPI)
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: always
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/search_db
@@ -35,6 +38,24 @@ services:
       - NEXT_PUBLIC_API_URL=http://your-vps-ip:8000
     depends_on:
       - backend
+
+  # 4. ETL Ingestion Service (Run on demand)
+  etl:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["ingest"] # Only start when explicitly requested
+    volumes:
+      - ./backend/.data:/app/.data
+      - ./etl:/app/etl
+      - ./pipelines:/app/pipelines
+      - ./backend/app:/app/app # Mount source code same as backend
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/search_db
+      - MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+    command: ["python", "etl/ingest.py", "--json-dir", "/app/.data/ingestion_data", "--pdf-dir", "/app/.data/gst_pdfs"]
+    depends_on:
+      - db
 
 volumes:
   postgres_data:

@@ -5,8 +5,8 @@ import { Inter } from "next/font/google";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Hybrid Search Engine",
-  description: "Self-funded document search with FastAPI and pgvector",
+  title: "Legal Search Buddy",
+  description: "High-fidelity legal document search with FastAPI and pgvector",
 };
 
 export default function RootLayout({

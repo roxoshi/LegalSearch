@@ -11,4 +11,14 @@ dependencies = [
     "pgvector",
     "sentence-transformers",
     "pydantic-settings",
+    "python-dotenv>=1.2.1",
+    "pymupdf",
+    "beautifulsoup4",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
