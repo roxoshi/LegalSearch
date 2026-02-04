@@ -1,7 +1,8 @@
-from typing import List
+from typing import List, Optional
 import os
 
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends, Query, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sentence_transformers import SentenceTransformer
@@ -9,8 +10,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import get_database, engine
 from contextlib import asynccontextmanager
 from . import models
-from .models import Document, DocumentChunk
+from .models import Document, DocumentChunk, User
 from .custom_types import SearchResult
+from .auth import (
+    UserCreate, UserLogin, Token, UserResponse,
+    create_user, authenticate_user, create_access_token,
+    get_user_by_email, get_current_user, get_current_user_required,
+    get_google_user_info, get_or_create_google_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
+from datetime import timedelta
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -133,3 +143,74 @@ def get_document_summary(id: int, db: Session = Depends(get_database)):
         summary += "..."
 
     return {"summary": summary}
+
+
+# ==================== Authentication Endpoints ====================
+
+@app.post("/auth/signup", response_model=UserResponse)
+def signup(user: UserCreate, db: Session = Depends(get_database)):
+    """Register a new user with email and password."""
+    # Check if user already exists
+    existing_user = get_user_by_email(db, user.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+
+    # Validate password
+    if len(user.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters"
+        )
+
+    return create_user(db, user)
+
+
+@app.post("/auth/login", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_database)):
+    """Login with email and password."""
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+class GoogleAuthRequest(BaseModel):
+    access_token: str
+
+
+@app.post("/auth/google", response_model=Token)
+async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_database)):
+    """Authenticate with Google OAuth token."""
+    try:
+        google_user = await get_google_user_info(request.access_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Google token"
+        )
+
+    user = get_or_create_google_user(db, google_user)
+
+    access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def get_current_user_info(current_user: User = Depends(get_current_user_required)):
+    """Get current authenticated user info."""
+    return current_user
