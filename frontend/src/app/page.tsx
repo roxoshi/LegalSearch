@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import SearchResult from '@/components/SearchResult';
+import { Header } from '@/components/Header';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 
 function SearchPageContent() {
@@ -75,6 +76,7 @@ function SearchPageContent() {
 
   return (
     <div className="min-h-screen bg-[#fcfcfc] text-slate-900 font-sans selection:bg-blue-100">
+      <Header />
       {/* Search Header Section */}
       <section className={`transition-all duration-500 ease-in-out px-6 ${results.length > 0 || loading ? 'pt-8 pb-8 border-b border-slate-100 bg-white' : 'pt-[30vh]'}`}>
         <div className="max-w-7xl mx-auto">
