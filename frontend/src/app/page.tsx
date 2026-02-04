@@ -14,7 +14,9 @@ function SearchPageContent() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     court: searchParams.get('court') || '',
-    year: searchParams.get('year') || ''
+    isGst: searchParams.get('is_gst') || '',
+    judge: searchParams.get('judge') || '',
+    decisionDate: searchParams.get('decision_date') || ''
   });
 
   const performSearch = async (searchQuery: string, searchFilters: any) => {
@@ -26,7 +28,9 @@ function SearchPageContent() {
       const params = new URLSearchParams({
         q: searchQuery,
         ...searchFilters.court && { court: searchFilters.court },
-        ...searchFilters.year && { year: searchFilters.year }
+        ...searchFilters.isGst && { is_gst: searchFilters.isGst },
+        ...searchFilters.judge && { judge: searchFilters.judge },
+        ...searchFilters.decisionDate && { decision_date: searchFilters.decisionDate }
       });
 
       const response = await fetch(`${apiUrl}/search?${params.toString()}`);
@@ -46,14 +50,14 @@ function SearchPageContent() {
     const q = searchParams.get('q');
     if (q) {
       setQuery(q);
-      setFilters({
+      const urlFilters = {
         court: searchParams.get('court') || '',
-        year: searchParams.get('year') || ''
-      });
-      performSearch(q, {
-        court: searchParams.get('court'),
-        year: searchParams.get('year')
-      });
+        isGst: searchParams.get('is_gst') || '',
+        judge: searchParams.get('judge') || '',
+        decisionDate: searchParams.get('decision_date') || ''
+      };
+      setFilters(urlFilters);
+      performSearch(q, urlFilters);
     }
   }, [searchParams]);
 
@@ -62,7 +66,9 @@ function SearchPageContent() {
     const params = new URLSearchParams();
     if (query) params.set('q', query);
     if (filters.court) params.set('court', filters.court);
-    if (filters.year) params.set('year', filters.year);
+    if (filters.isGst) params.set('is_gst', filters.isGst);
+    if (filters.judge) params.set('judge', filters.judge);
+    if (filters.decisionDate) params.set('decision_date', filters.decisionDate);
 
     router.push(`/?${params.toString()}`);
   };
@@ -99,67 +105,87 @@ function SearchPageContent() {
               </div>
             )}
           </form>
+
+          {/* Filters Section - Below Search Bar */}
+          <div className="max-w-4xl mx-auto mt-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Court</label>
+                <select
+                  value={filters.court}
+                  onChange={(e) => setFilters({ ...filters, court: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="">All Courts</option>
+                  <option value="Supreme Court">Supreme Court</option>
+                  <option value="High Court">High Court</option>
+                  <option value="District Court">District Court</option>
+                  <option value="Tribunal">Tribunal</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">GST Case</label>
+                <select
+                  value={filters.isGst}
+                  onChange={(e) => setFilters({ ...filters, isGst: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="">All</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Judge</label>
+                <input
+                  type="text"
+                  placeholder="Judge name"
+                  value={filters.judge}
+                  onChange={(e) => setFilters({ ...filters, judge: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Decision Date</label>
+                <input
+                  type="date"
+                  value={filters.decisionDate}
+                  onChange={(e) => setFilters({ ...filters, decisionDate: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                />
+              </div>
+              <button
+                onClick={handleSearch}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
-        <div className="flex flex-col lg:flex-row gap-12">
-          {/* Left Sidebar Filters */}
-          <aside className="w-full lg:w-64 space-y-8">
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-6">Search Filters</h3>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-alt mb-2">Court</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Supreme Court"
-                    value={filters.court}
-                    onChange={(e) => setFilters({ ...filters, court: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-alt mb-2">Decision Year</label>
-                  <input
-                    type="text"
-                    placeholder="YYYY"
-                    value={filters.year}
-                    onChange={(e) => setFilters({ ...filters, year: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <button
-                  onClick={handleSearch}
-                  className="w-full py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+        {/* Results Area */}
+        <div className="max-w-4xl mx-auto">
+          {results.length > 0 ? (
+            <div className="space-y-6">
+              <p className="text-sm text-slate-500 mb-6">Found {results.length} relevant documents</p>
+              {results.map((result: any, index) => (
+                <div
+                  key={result.id}
+                  className="animate-in fade-in slide-in-from-bottom-4 duration-500"
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  Apply Filters
-                </button>
-              </div>
+                  <SearchResult result={result} />
+                </div>
+              ))}
             </div>
-          </aside>
-
-          {/* Results Area */}
-          <div className="flex-1">
-            {results.length > 0 ? (
-              <div className="space-y-6">
-                <p className="text-sm text-slate-500 mb-6">Found {results.length} relevant documents</p>
-                {results.map((result: any, index) => (
-                  <div
-                    key={result.id}
-                    className="animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <SearchResult result={result} />
-                  </div>
-                ))}
-              </div>
-            ) : !loading && query && (
-              <div className="text-center py-20 bg-white rounded-3xl border border-slate-100 border-dashed">
-                <p className="text-slate-400">No documents found matching your criteria.</p>
-              </div>
-            )}
-          </div>
+          ) : !loading && query && (
+            <div className="text-center py-20 bg-white rounded-3xl border border-slate-100 border-dashed">
+              <p className="text-slate-400">No documents found matching your criteria.</p>
+            </div>
+          )}
         </div>
       </main>
     </div>
