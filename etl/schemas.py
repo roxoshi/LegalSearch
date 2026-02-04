@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import List, Optional
 
 class DocumentJSON(BaseModel):
     case_id: str
@@ -9,8 +10,13 @@ class DocumentJSON(BaseModel):
     citation: str = Field(default="Unknown")
     court: str = Field(default="Unknown Court")
     decision_date: str = Field(..., description="Judgment date (YYYY-MM-DD or similar)")
-    
+
     text_content: str = Field(..., description="Text used for search indexing")
-    
+
+    # ML-extracted fields from filter step
+    is_gst_core: Optional[bool] = Field(default=None, description="Whether this is a core GST case")
+    extracted_provisions: Optional[List[str]] = Field(default=None, description="Legal provisions extracted by NER")
+    extracted_statutes: Optional[List[str]] = Field(default=None, description="Statutes extracted by NER")
+
     class Config:
         extra = "ignore"

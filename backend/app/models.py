@@ -1,5 +1,6 @@
 
-from sqlalchemy import Column, Integer, Text, ForeignKey
+from sqlalchemy import Column, Integer, Text, ForeignKey, Boolean
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from .database import Base
@@ -18,6 +19,11 @@ class Document(Base):
     case_id = Column(Text, nullable=False, unique=True)
     content = Column(Text, nullable=False)
     display_content = Column(Text, nullable=True)
+
+    # ML-extracted fields from filter step
+    is_gst_core = Column(Boolean, nullable=True, default=None)
+    extracted_provisions = Column(ARRAY(Text), nullable=True)
+    extracted_statutes = Column(ARRAY(Text), nullable=True)
 
     chunks = relationship("DocumentChunk", back_populates="document")
 

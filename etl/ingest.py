@@ -48,7 +48,7 @@ def main():
     transformer = Transformer(model_name=model_name)
     
     # Scan files
-    json_files = list(json_dir.glob("*.json"))
+    json_files = sorted(json_dir.rglob("*.json"))
     logger.info(f"Found {len(json_files)} JSON files.")
     
     if args.limit > 0:

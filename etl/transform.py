@@ -65,8 +65,12 @@ class Transformer:
             decision_date=doc_json.decision_date,
             court=doc_json.court,
             case_id=doc_json.case_id,
-            content=doc_json.text_content, # Raw text for backup/search
-            display_content=display_html
+            content=doc_json.text_content,  # Raw text for backup/search
+            display_content=display_html,
+            # ML-extracted fields from filter step
+            is_gst_core=doc_json.is_gst_core,
+            extracted_provisions=doc_json.extracted_provisions,
+            extracted_statutes=doc_json.extracted_statutes,
         )
 
         # 3. Chunking

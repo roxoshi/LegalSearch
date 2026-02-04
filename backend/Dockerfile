@@ -17,9 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system .
 
 COPY backend/app /app/app
-COPY backend/ingest.py /app/.
 COPY pipelines /app/pipelines
 COPY etl /app/etl
-COPY backend/.data /app/.data
 
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -9,9 +9,9 @@ from sqlalchemy.orm import sessionmaker
 # For now, assuming PYTHONPATH will include project root.
 
 try:
-    from backend.app.models import Base
+    from backend.app.models import Base, Document
 except ImportError:
-    from app.models import Base
+    from app.models import Base, Document
 
 logger = logging.getLogger(__name__)
 

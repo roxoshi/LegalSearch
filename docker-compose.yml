@@ -39,23 +39,66 @@ services:
     depends_on:
       - backend
 
-  # 4. ETL Ingestion Service (Run on demand)
+  # 4. Shard Service: Extract raw zips + parquet into individual JSON + PDF files
+  shard:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["ingest"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+    command: >
+      python -m pipelines.shard_judgments
+      --metadata-dir /app/.data/metadata/raw
+      --judgments-dir /app/.data/GST_judgments
+      --output-dir /app/.data/metadata/processed
+      --pdf-output-dir /app/.data/gst_pdfs
+
+  # 5. Filter Service: ML-based filtering of sharded judgments (with GPU support)
+  filter:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile.filter
+    profiles: ["ingest"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+    command: >
+      python -m pipelines.filter_judgments
+      --processed-dir /app/.data/metadata/processed
+      --pdf-dir /app/.data/gst_pdfs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      shard:
+        condition: service_completed_successfully
+
+  # 6. ETL Ingestion Service: Ingest sharded JSON + PDF into PostgreSQL
   etl:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    profiles: ["ingest"] # Only start when explicitly requested
+    profiles: ["ingest"]
     volumes:
-      - ./backend/.data:/app/.data
+      - ./.data:/app/.data
       - ./etl:/app/etl
       - ./pipelines:/app/pipelines
-      - ./backend/app:/app/app # Mount source code same as backend
+      - ./backend/app:/app/app
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/search_db
       - MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-    command: ["python", "etl/ingest.py", "--json-dir", "/app/.data/ingestion_data", "--pdf-dir", "/app/.data/gst_pdfs"]
+    command: ["python", "etl/ingest.py", "--json-dir", "/app/.data/metadata/processed", "--pdf-dir", "/app/.data/gst_pdfs"]
     depends_on:
-      - db
+      filter:
+        condition: service_completed_successfully
+      db:
+        condition: service_started
 
 volumes:
   postgres_data:

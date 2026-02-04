@@ -7,6 +7,19 @@ dependencies = [
    "beautifulsoup4",
    "pymupdf>=1.26.7",
    "tools>=1.0.17",
+   "pdfplumber",
+   "pandas",
+   "pyarrow",
+   "tqdm",
+]
+
+[project.optional-dependencies]
+# ML dependencies for filter step - install with: pip install .[ml]
+# The legal NER model must be installed separately:
+#   pip install https://huggingface.co/opennyaiorg/en_legal_ner_trf/resolve/main/en_legal_ner_trf-any-py3-none-any.whl
+ml = [
+   "spacy>=3.7.0",
+   "torch>=2.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
