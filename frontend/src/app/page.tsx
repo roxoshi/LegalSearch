@@ -14,7 +14,9 @@ function SearchPageContent() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     court: searchParams.get('court') || '',
-    year: searchParams.get('year') || ''
+    isGst: searchParams.get('is_gst') || '',
+    judge: searchParams.get('judge') || '',
+    decisionDate: searchParams.get('decision_date') || ''
   });
 
   const performSearch = async (searchQuery: string, searchFilters: any) => {
@@ -26,7 +28,9 @@ function SearchPageContent() {
       const params = new URLSearchParams({
         q: searchQuery,
         ...searchFilters.court && { court: searchFilters.court },
-        ...searchFilters.year && { year: searchFilters.year }
+        ...searchFilters.isGst && { is_gst: searchFilters.isGst },
+        ...searchFilters.judge && { judge: searchFilters.judge },
+        ...searchFilters.decisionDate && { decision_date: searchFilters.decisionDate }
       });
 
       const response = await fetch(`${apiUrl}/search?${params.toString()}`);
@@ -46,14 +50,14 @@ function SearchPageContent() {
     const q = searchParams.get('q');
     if (q) {
       setQuery(q);
-      setFilters({
+      const urlFilters = {
         court: searchParams.get('court') || '',
-        year: searchParams.get('year') || ''
-      });
-      performSearch(q, {
-        court: searchParams.get('court'),
-        year: searchParams.get('year')
-      });
+        isGst: searchParams.get('is_gst') || '',
+        judge: searchParams.get('judge') || '',
+        decisionDate: searchParams.get('decision_date') || ''
+      };
+      setFilters(urlFilters);
+      performSearch(q, urlFilters);
     }
   }, [searchParams]);
 
@@ -62,7 +66,9 @@ function SearchPageContent() {
     const params = new URLSearchParams();
     if (query) params.set('q', query);
     if (filters.court) params.set('court', filters.court);
-    if (filters.year) params.set('year', filters.year);
+    if (filters.isGst) params.set('is_gst', filters.isGst);
+    if (filters.judge) params.set('judge', filters.judge);
+    if (filters.decisionDate) params.set('decision_date', filters.decisionDate);
 
     router.push(`/?${params.toString()}`);
   };
@@ -105,22 +111,47 @@ function SearchPageContent() {
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Court</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Supreme Court"
+                <select
                   value={filters.court}
                   onChange={(e) => setFilters({ ...filters, court: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="">All Courts</option>
+                  <option value="Supreme Court">Supreme Court</option>
+                  <option value="High Court">High Court</option>
+                  <option value="District Court">District Court</option>
+                  <option value="Tribunal">Tribunal</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">GST Case</label>
+                <select
+                  value={filters.isGst}
+                  onChange={(e) => setFilters({ ...filters, isGst: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="">All</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Judge</label>
+                <input
+                  type="text"
+                  placeholder="Judge name"
+                  value={filters.judge}
+                  onChange={(e) => setFilters({ ...filters, judge: e.target.value })}
                   className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Year</label>
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Decision Date</label>
                 <input
-                  type="text"
-                  placeholder="YYYY"
-                  value={filters.year}
-                  onChange={(e) => setFilters({ ...filters, year: e.target.value })}
-                  className="w-24 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                  type="date"
+                  value={filters.decisionDate}
+                  onChange={(e) => setFilters({ ...filters, decisionDate: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                 />
               </div>
               <button

@@ -48,20 +48,31 @@ async def lifespan(app):
 def vector_search(q: str = Query(...),
                   court: str = Query(None),
                   year: str = Query(None),
+                  judge: str = Query(None),
+                  is_gst: str = Query(None),
+                  decision_date: str = Query(None),
                   db: Session = Depends(get_database)) -> List[SearchResult]:
     query_vector = embed_model.encode(q).tolist()
 
     # Base statement joining DocumentChunk and Document
     stmt = select(DocumentChunk, Document).join(Document, DocumentChunk.document_id == Document.id)
-    
+
     # Apply filters if provided
     if court:
         stmt = stmt.where(Document.court.ilike(f"%{court}%"))
-    
+
     if year:
-        # Assuming decision_date is stored as string like "YYYY-MM-DD" or similar
-        # Since it is just standard text search on a text column
         stmt = stmt.where(Document.decision_date.like(f"%{year}%"))
+
+    if judge:
+        stmt = stmt.where(Document.judge.ilike(f"%{judge}%"))
+
+    if is_gst is not None and is_gst.lower() in ('true', 'false', 'yes', 'no'):
+        is_gst_value = is_gst.lower() in ('true', 'yes')
+        stmt = stmt.where(Document.is_gst_core == is_gst_value)
+
+    if decision_date:
+        stmt = stmt.where(Document.decision_date.like(f"{decision_date}%"))
 
     # Fetch more candidates to ensure we find unique documents
     stmt = (
