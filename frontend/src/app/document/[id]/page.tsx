@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 export default function DocumentDetailsPage() {
   const { id } = useParams();
   const router = useRouter();
   const [doc, setDoc] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     // Fetch individual document from fastapi
@@ -86,6 +88,56 @@ export default function DocumentDetailsPage() {
           </div>
 
           <aside className="space-y-6">
+            {/* AI Summary Section */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100">
+              <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <SparklesIcon className="w-5 h-5 text-blue-600" />
+                AI Summary
+              </h3>
+              {summary ? (
+                <div className="text-sm text-slate-700 leading-relaxed">
+                  {summary}
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm text-slate-600 mb-4">
+                    Generate an AI-powered summary of this case to quickly understand the key points.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setSummaryLoading(true);
+                      try {
+                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                        const res = await fetch(`${apiUrl}/document/${id}/summary`);
+                        if (!res.ok) throw new Error('Failed to generate summary');
+                        const data = await res.json();
+                        setSummary(data.summary);
+                      } catch (err) {
+                        console.error('Failed to generate summary', err);
+                        setSummary('Failed to generate summary. Please try again.');
+                      } finally {
+                        setSummaryLoading(false);
+                      }
+                    }}
+                    disabled={summaryLoading}
+                    className="w-full py-2 px-4 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {summaryLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <SparklesIcon className="w-4 h-4" />
+                        Generate Summary
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
               <h3 className="font-semibold text-slate-900 mb-4">Case Metadata</h3>
               <div className="space-y-4 text-sm">
