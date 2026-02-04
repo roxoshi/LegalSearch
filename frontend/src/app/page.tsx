@@ -99,67 +99,62 @@ function SearchPageContent() {
               </div>
             )}
           </form>
+
+          {/* Filters Section - Below Search Bar */}
+          <div className="max-w-4xl mx-auto mt-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Court</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Supreme Court"
+                  value={filters.court}
+                  onChange={(e) => setFilters({ ...filters, court: e.target.value })}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Year</label>
+                <input
+                  type="text"
+                  placeholder="YYYY"
+                  value={filters.year}
+                  onChange={(e) => setFilters({ ...filters, year: e.target.value })}
+                  className="w-24 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                />
+              </div>
+              <button
+                onClick={handleSearch}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
-        <div className="flex flex-col lg:flex-row gap-12">
-          {/* Left Sidebar Filters */}
-          <aside className="w-full lg:w-64 space-y-8">
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-6">Search Filters</h3>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-alt mb-2">Court</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Supreme Court"
-                    value={filters.court}
-                    onChange={(e) => setFilters({ ...filters, court: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-alt mb-2">Decision Year</label>
-                  <input
-                    type="text"
-                    placeholder="YYYY"
-                    value={filters.year}
-                    onChange={(e) => setFilters({ ...filters, year: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <button
-                  onClick={handleSearch}
-                  className="w-full py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
+        {/* Results Area */}
+        <div className="max-w-4xl mx-auto">
+          {results.length > 0 ? (
+            <div className="space-y-6">
+              <p className="text-sm text-slate-500 mb-6">Found {results.length} relevant documents</p>
+              {results.map((result: any, index) => (
+                <div
+                  key={result.id}
+                  className="animate-in fade-in slide-in-from-bottom-4 duration-500"
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  Apply Filters
-                </button>
-              </div>
+                  <SearchResult result={result} />
+                </div>
+              ))}
             </div>
-          </aside>
-
-          {/* Results Area */}
-          <div className="flex-1">
-            {results.length > 0 ? (
-              <div className="space-y-6">
-                <p className="text-sm text-slate-500 mb-6">Found {results.length} relevant documents</p>
-                {results.map((result: any, index) => (
-                  <div
-                    key={result.id}
-                    className="animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <SearchResult result={result} />
-                  </div>
-                ))}
-              </div>
-            ) : !loading && query && (
-              <div className="text-center py-20 bg-white rounded-3xl border border-slate-100 border-dashed">
-                <p className="text-slate-400">No documents found matching your criteria.</p>
-              </div>
-            )}
-          </div>
+          ) : !loading && query && (
+            <div className="text-center py-20 bg-white rounded-3xl border border-slate-100 border-dashed">
+              <p className="text-slate-400">No documents found matching your criteria.</p>
+            </div>
+          )}
         </div>
       </main>
     </div>
