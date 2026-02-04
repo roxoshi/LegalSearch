@@ -83,7 +83,7 @@ function SearchPageContent() {
               Legal Search <span className="font-bold text-blue-600">Buddy</span>
             </h1>
           )}
-          <form onSubmit={handleSearch} className="max-w-4xl mx-auto relative group">
+          <form onSubmit={handleSearch} className="max-w-6xl mx-auto relative group">
             <input
               type="text"
               value={query}
@@ -107,7 +107,7 @@ function SearchPageContent() {
           </form>
 
           {/* Filters Section - Below Search Bar */}
-          <div className="max-w-4xl mx-auto mt-4">
+          <div className="max-w-6xl mx-auto mt-4">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Court</label>
@@ -167,7 +167,7 @@ function SearchPageContent() {
 
       <main className="max-w-7xl mx-auto px-6 py-12">
         {/* Results Area */}
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           {results.length > 0 ? (
             <div className="space-y-6">
               <p className="text-sm text-slate-500 mb-6">Found {results.length} relevant documents</p>
