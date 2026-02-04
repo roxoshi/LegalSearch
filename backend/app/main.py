@@ -112,3 +112,24 @@ def get_document(id: int, db: Session = Depends(get_database)):
     if not doc:
         return {"error": "Document not found"}
     return doc
+
+
+@app.get("/document/{id}/summary")
+def get_document_summary(id: int, db: Session = Depends(get_database)):
+    """
+    Generate an AI summary for a document.
+    Currently returns first 1000 characters as a mock implementation.
+    TODO: Replace with actual LLM API call (OpenAI, Anthropic, etc.)
+    """
+    doc = db.query(Document).filter(Document.id == id).first()
+    if not doc:
+        return {"error": "Document not found"}
+
+    # Mock LLM response - return first 1000 characters
+    # Replace this with actual LLM API call in production
+    content = doc.content or doc.display_content or ""
+    summary = content[:1000]
+    if len(content) > 1000:
+        summary += "..."
+
+    return {"summary": summary}
