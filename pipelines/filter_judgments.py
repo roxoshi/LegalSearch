@@ -15,7 +15,7 @@ logger = logging.getLogger("filter_judgments")
 
 FilterResult = namedtuple("FilterResult", ["kept", "removed"])
 
-GST_STATUTES_KEYWORDS = ["goods and services", "goods & services", "gst"]
+GST_STATUTES_KEYWORDS = ["goods and services", "goods & services"]
 
 MAX_TEXT_CHARS = 6000
 
@@ -30,30 +30,45 @@ def _load_nlp_model():
         return _nlp
 
     try:
-        import torch
         import spacy
 
-        # Enable GPU before loading the model
-        if torch.cuda.is_available():
-            logger.info("CUDA available, enabling GPU for spaCy")
-            spacy.require_gpu()
-        else:
-            logger.info("CUDA not available, using CPU")
+        # Try to enable GPU if available
+        gpu_enabled = False
+        try:
+            import torch
+            if torch.cuda.is_available():
+                try:
+                    spacy.require_gpu()
+                    gpu_enabled = True
+                    logger.info("CUDA available, GPU enabled for spaCy")
+                except Exception as gpu_err:
+                    logger.warning(f"Failed to enable GPU: {gpu_err}. Falling back to CPU.")
+            else:
+                logger.info("CUDA not available, using CPU")
+        except ImportError:
+            logger.info("PyTorch not installed, using CPU for spaCy")
 
         # Try loading the model
         try:
             _nlp = spacy.load("en_legal_ner_trf")
-            logger.info("Loaded spaCy model: en_legal_ner_trf")
+            logger.info(f"Loaded spaCy model: en_legal_ner_trf (GPU: {gpu_enabled})")
         except OSError:
             # Model not installed as package, try importing directly
-            import en_legal_ner_trf
-            _nlp = en_legal_ner_trf.load()
-            logger.info("Loaded spaCy model via direct import")
+            try:
+                import en_legal_ner_trf
+                _nlp = en_legal_ner_trf.load()
+                logger.info(f"Loaded spaCy model via direct import (GPU: {gpu_enabled})")
+            except ImportError:
+                logger.warning("en_legal_ner_trf model not found. Using fallback classifier.")
+                return None
 
         return _nlp
 
     except ImportError as e:
-        logger.warning(f"ML dependencies not available: {e}. Using fallback classifier.")
+        logger.warning(f"spaCy not available: {e}. Using fallback classifier.")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load NLP model: {e}. Using fallback classifier.")
         return None
 
 

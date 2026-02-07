@@ -1,28 +1,31 @@
-# Dockerfile for filter service with ML/NER capabilities
-# Uses CUDA base image for GPU support
+# Filter service Dockerfile with ML/NER capabilities
+# For faster builds, first run: ./scripts/build-base-images.sh
+# Then build with: docker compose build --build-arg BASE_IMAGE=legalsearch-base-filter filter
 
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+ARG BASE_IMAGE=pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/0.9.26/install.sh | sh
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
-# Install Python dependencies
-COPY pipelines/pyproject.toml ./pipelines/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    cd pipelines && uv pip install --system ".[ml]"
+# Install system deps and uv (only if not using base image)
+RUN which uv || (apt-get update && apt-get install -y \
+    build-essential curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/0.9.26/install.sh | sh)
 
-# Install spaCy and the legal NER model
-RUN pip install spacy>=3.7.0 && \
-    pip install https://huggingface.co/opennyaiorg/en_legal_ner_trf/resolve/main/en_legal_ner_trf-any-py3-none-any.whl
+# Copy dependency files
+COPY pipelines/pyproject.toml ./pipelines/
+
+# Install Python dependencies with cache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    cd pipelines && (uv pip install --system ".[ml]" 2>/dev/null || pip install ".[ml]")
+
+# Install spaCy and legal NER model (skip if already in base image)
+RUN python -c "import en_legal_ner_trf" 2>/dev/null || \
+    (pip install spacy>=3.7.0 && \
+     pip install https://huggingface.co/opennyaiorg/en_legal_ner_trf/resolve/main/en_legal_ner_trf-any-py3-none-any.whl)
 
 # Copy application code
 COPY pipelines /app/pipelines
