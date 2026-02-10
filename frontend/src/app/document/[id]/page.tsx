@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeftIcon, SparklesIcon } from '@heroicons/react/24/outline';
+<<<<<<< HEAD
 import { getApiUrl } from '@/lib/api';
+=======
+>>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 
 export default function DocumentDetailsPage() {
   const { id } = useParams();
@@ -12,11 +15,14 @@ export default function DocumentDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+<<<<<<< HEAD
   const [apiUrl, setApiUrl] = useState('');
 
   useEffect(() => {
     setApiUrl(getApiUrl());
   }, []);
+=======
+>>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 
   useEffect(() => {
     const fetchDoc = async () => {
@@ -122,7 +128,25 @@ export default function DocumentDetailsPage() {
                     Generate an AI-powered summary of this case to quickly understand the key points.
                   </p>
                   <button
+<<<<<<< HEAD
                     onClick={generateSummary}
+=======
+                    onClick={async () => {
+                      setSummaryLoading(true);
+                      try {
+                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                        const res = await fetch(`${apiUrl}/document/${id}/summary`);
+                        if (!res.ok) throw new Error('Failed to generate summary');
+                        const data = await res.json();
+                        setSummary(data.summary);
+                      } catch (err) {
+                        console.error('Failed to generate summary', err);
+                        setSummary('Failed to generate summary. Please try again.');
+                      } finally {
+                        setSummaryLoading(false);
+                      }
+                    }}
+>>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
                     disabled={summaryLoading}
                     className="w-full py-2 px-4 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
@@ -142,7 +166,10 @@ export default function DocumentDetailsPage() {
               )}
             </div>
 
+<<<<<<< HEAD
             {/* Case Metadata */}
+=======
+>>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
               <h3 className="font-semibold text-slate-900 mb-4">Case Metadata</h3>
               <div className="space-y-4 text-sm">

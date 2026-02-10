@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -6,6 +7,29 @@ from sqlalchemy.orm import relationship
 from .database import Base
 
 
+=======
+
+from sqlalchemy import Column, Integer, Text, ForeignKey, Boolean, DateTime
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
+from datetime import datetime
+from .database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(Text, unique=True, nullable=False, index=True)
+    hashed_password = Column(Text, nullable=True)  # Null for OAuth-only users
+    name = Column(Text, nullable=True)
+    oauth_provider = Column(Text, nullable=True)  # 'google' or None for email/password
+    oauth_id = Column(Text, nullable=True)  # Google user ID
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+
+>>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 class Document(Base):
     __tablename__ = "documents"
 
