@@ -1,11 +1,12 @@
 import pytest
+
 from etl.schemas import DocumentJSON
 
 
 def test_document_json_validation_success(sample_json_data):
     """Test that DocumentJSON validates correct data"""
     doc = DocumentJSON(**sample_json_data)
-    
+
     assert doc.title == "Test Case v. Example"
     assert doc.case_id == "TEST-001"
     assert doc.text_content == "This is test legal content for the case."
@@ -17,15 +18,15 @@ def test_document_json_validation_missing_field():
         "title": "Test Case",
         # Missing other required fields
     }
-    
+
     with pytest.raises(Exception):  # Pydantic ValidationError
-        DocumentJSON(**incomplete_data)
+        DocumentJSON(**incomplete_data)  # type: ignore[arg-type]
 
 
 def test_document_json_all_fields(sample_json_data):
     """Test that all fields are properly set"""
     doc = DocumentJSON(**sample_json_data)
-    
+
     assert doc.title is not None
     assert doc.petitioner is not None
     assert doc.respondent is not None

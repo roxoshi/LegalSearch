@@ -1,6 +1,7 @@
 import pytest
-from app.main import app, embed_model
 from fastapi.testclient import TestClient
+
+from app.main import app, embed_model
 
 
 @pytest.fixture

@@ -1,0 +1,145 @@
+# Staging override: Pipeline services for building the database
+# Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml --profile ingest up
+
+services:
+  # SC Shard Service: Extract raw SC zips + parquet into individual JSON + PDF files
+  shard:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        - BASE_IMAGE=${BACKEND_BASE_IMAGE:-python:3.13-slim}
+    profiles: ["ingest"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+    command: >
+      python -m pipelines.shard_judgments
+      --metadata-dir /app/.data/metadata/raw
+      --judgments-dir /app/.data/GST_judgments
+      --output-dir /app/.data/metadata/processed
+      --pdf-output-dir /app/.data/gst_pdfs
+
+  # Filter Service: ML-based filtering of sharded judgments (GPU optional)
+  filter:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile.filter
+      args:
+        - BASE_IMAGE=${FILTER_BASE_IMAGE:-pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime}
+    profiles: ["ingest"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+    command: >
+      python -m pipelines.filter_judgments
+      --processed-dir /app/.data/metadata/processed
+      --pdf-dir /app/.data/gst_pdfs
+    # Uncomment below to enable GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    depends_on:
+      shard:
+        condition: service_completed_successfully
+
+  # ETL Ingestion Service: Ingest sharded JSON + PDF into PostgreSQL (legacy multi-step)
+  etl:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        - BASE_IMAGE=${BACKEND_BASE_IMAGE:-python:3.13-slim}
+    profiles: ["ingest"]
+    volumes:
+      - ./.data:/app/.data
+      - ./etl:/app/etl
+      - ./pipelines:/app/pipelines
+      - ./backend/app:/app/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-search_db}
+      - MODEL_NAME=${MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+    command: ["python", "etl/ingest.py", "--json-dir", "/app/.data/metadata/processed", "--pdf-dir", "/app/.data/gst_pdfs"]
+    depends_on:
+      filter:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+
+  # Unified Pipeline: Optimized single-step ingestion (RECOMMENDED)
+  unified:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile.unified
+      args:
+        - BASE_IMAGE=${UNIFIED_BASE_IMAGE:-legalsearch-base-unified}
+    profiles: ["ingest-fast"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+      - ./etl:/app/etl
+      - ./backend/app:/app/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-search_db}
+      - MODEL_NAME=${MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+    command: >
+      python -m pipelines.unified_pipeline
+      --metadata-dir /app/.data/metadata/raw
+      --judgments-dir /app/.data/GST_judgments
+      --court-type all
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Unified Pipeline (Import): Run Steps 4-6 on pre-exported filtered data
+  unified-import:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile.unified
+      args:
+        - BASE_IMAGE=${UNIFIED_BASE_IMAGE:-legalsearch-base-unified}
+    profiles: ["ingest-import"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+      - ./etl:/app/etl
+      - ./backend/app:/app/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-search_db}
+      - MODEL_NAME=${MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+    command: >
+      python -m pipelines.unified_pipeline
+      --import-filtered
+      --import-dir /app/.data/export
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Unified Pipeline (HC only): High Court ingestion
+  unified-hc:
+    build:
+      context: .
+      dockerfile: pipelines/Dockerfile.unified
+      args:
+        - BASE_IMAGE=${UNIFIED_BASE_IMAGE:-legalsearch-base-unified}
+    profiles: ["ingest-hc"]
+    volumes:
+      - ./.data:/app/.data
+      - ./pipelines:/app/pipelines
+      - ./etl:/app/etl
+      - ./backend/app:/app/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-search_db}
+      - MODEL_NAME=${MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+    command: >
+      python -m pipelines.unified_pipeline
+      --metadata-dir /app/.data/metadata/raw
+      --judgments-dir /app/.data/GST_judgments
+      --court-type hc
+    depends_on:
+      db:
+        condition: service_healthy

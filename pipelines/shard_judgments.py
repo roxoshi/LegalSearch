@@ -1,14 +1,15 @@
 import argparse
-import pandas as pd
-import json
-import os
-import zipfile
 import io
-import pdfplumber
-import shutil
+import json
 import logging
+import os
+import shutil
+import zipfile
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+
+import pandas as pd
+import pdfplumber
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,9 +18,19 @@ logging.basicConfig(
 logger = logging.getLogger("shard_judgments")
 
 KEEP_COLUMNS = [
-    'title', 'petitioner', 'respondent', 'judge',
-    'citation', 'case_id', 'cnr', 'decision_date',
-    'disposal_nature', 'court', 'nc_display', 'year', 'path'
+    "title",
+    "petitioner",
+    "respondent",
+    "judge",
+    "citation",
+    "case_id",
+    "cnr",
+    "decision_date",
+    "disposal_nature",
+    "court",
+    "nc_display",
+    "year",
+    "path",
 ]
 
 
@@ -33,9 +44,11 @@ class FullTextExtractor:
         actual_target = next((f for f in all_files if f.lower().endswith(filename.lower())), None)
 
         if not actual_target:
-            base = filename.rsplit('.', 1)[0]
+            base = filename.rsplit(".", 1)[0]
             en_filename = f"{base}_EN.pdf"
-            actual_target = next((f for f in all_files if f.lower().endswith(en_filename.lower())), None)
+            actual_target = next(
+                (f for f in all_files if f.lower().endswith(en_filename.lower())), None
+            )
 
         return actual_target
 
@@ -53,7 +66,7 @@ class FullTextExtractor:
             pdf_bytes = zip_file.read(actual_target)
 
             # Write PDF file
-            with open(pdf_output_path, 'wb') as dst:
+            with open(pdf_output_path, "wb") as dst:
                 dst.write(pdf_bytes)
 
             # Extract text
@@ -75,7 +88,7 @@ class FullTextExtractor:
         if not os.path.exists(zip_path):
             return ""
         try:
-            with zipfile.ZipFile(zip_path, 'r') as z:
+            with zipfile.ZipFile(zip_path, "r") as z:
                 actual_target = FullTextExtractor._find_target_in_zip(z, record_path)
                 if not actual_target:
                     return ""
@@ -100,13 +113,13 @@ class FullTextExtractor:
         if not os.path.exists(zip_path):
             return False
         try:
-            with zipfile.ZipFile(zip_path, 'r') as z:
+            with zipfile.ZipFile(zip_path, "r") as z:
                 actual_target = FullTextExtractor._find_target_in_zip(z, record_path)
                 if not actual_target:
                     return False
 
                 with z.open(actual_target) as src:
-                    with open(output_pdf_path, 'wb') as dst:
+                    with open(output_pdf_path, "wb") as dst:
                         shutil.copyfileobj(src, dst)
                 return True
         except Exception:
@@ -125,8 +138,8 @@ def _process_chunk(chunk_records, judgments_dir, processed_dir, pdf_output_dir):
 
     try:
         for record in chunk_records:
-            cite = record.get('citation')
-            year = str(record.get('year'))
+            cite = record.get("citation")
+            year = str(record.get("year"))
 
             if not cite:
                 continue
@@ -139,7 +152,7 @@ def _process_chunk(chunk_records, judgments_dir, processed_dir, pdf_output_dir):
                 zip_name = f"SC-GST-{year}.zip"
                 zip_path = os.path.join(judgments_dir, zip_name)
                 if os.path.exists(zip_path):
-                    current_zip = zipfile.ZipFile(zip_path, 'r')
+                    current_zip = zipfile.ZipFile(zip_path, "r")
                 current_year = year
 
             if current_zip is None:
@@ -153,14 +166,14 @@ def _process_chunk(chunk_records, judgments_dir, processed_dir, pdf_output_dir):
             pdf_output_path = Path(pdf_output_dir) / pdf_filename
 
             # Single-pass: extract text and PDF together
-            record['text_content'] = FullTextExtractor.extract_text_and_pdf(
-                current_zip, record['path'], pdf_output_path
+            record["text_content"] = FullTextExtractor.extract_text_and_pdf(
+                current_zip, record["path"], pdf_output_path
             )
 
             # Save individual JSON
             json_filename = f"{Path(record['path']).stem}.json"
             output_path = year_dir / json_filename
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(record, f, indent=4, ensure_ascii=False)
 
             success_count += 1
@@ -172,12 +185,16 @@ def _process_chunk(chunk_records, judgments_dir, processed_dir, pdf_output_dir):
 
 
 def process_and_shard_data(metadata_raw_dir, judgments_dir, processed_dir, pdf_output_dir, workers):
-    files = [f for f in os.listdir(metadata_raw_dir) if f.endswith('.parquet')]
+    files = [
+        f
+        for f in os.listdir(metadata_raw_dir)
+        if f.startswith("SC-GST-") and f.endswith(".parquet")
+    ]
     logger.info("Loading metadata records...")
     temp_records = []
     for file in files:
         df = pd.read_parquet(os.path.join(metadata_raw_dir, file), columns=KEEP_COLUMNS)
-        temp_records.extend(df.to_dict(orient='records'))
+        temp_records.extend(df.to_dict(orient="records"))
 
     logger.info(f"Loaded {len(temp_records)} total records")
 
@@ -185,20 +202,22 @@ def process_and_shard_data(metadata_raw_dir, judgments_dir, processed_dir, pdf_o
     seen_citations = set()
     unique_records = []
     for record in temp_records:
-        cite = record.get('citation')
+        cite = record.get("citation")
         if not cite or cite in seen_citations:
             continue
         seen_citations.add(cite)
         unique_records.append(record)
 
-    logger.info(f"Processing {len(unique_records)} unique citations (deduped from {len(temp_records)})")
+    logger.info(
+        f"Processing {len(unique_records)} unique citations (deduped from {len(temp_records)})"
+    )
 
     # Ensure output directories exist
     Path(pdf_output_dir).mkdir(parents=True, exist_ok=True)
     Path(processed_dir).mkdir(parents=True, exist_ok=True)
 
     # Sort by year for zip locality
-    unique_records.sort(key=lambda r: str(r.get('year', '')))
+    unique_records.sort(key=lambda r: str(r.get("year", "")))
 
     if workers <= 1:
         # Single-process path (no multiprocessing overhead)
@@ -207,8 +226,7 @@ def process_and_shard_data(metadata_raw_dir, judgments_dir, processed_dir, pdf_o
         # Split into N roughly equal chunks, each pre-sorted by year
         chunk_size = (len(unique_records) + workers - 1) // workers
         chunks = [
-            unique_records[i:i + chunk_size]
-            for i in range(0, len(unique_records), chunk_size)
+            unique_records[i : i + chunk_size] for i in range(0, len(unique_records), chunk_size)
         ]
 
         logger.info(f"Distributing {len(unique_records)} records across {len(chunks)} workers")
@@ -225,17 +243,35 @@ def process_and_shard_data(metadata_raw_dir, judgments_dir, processed_dir, pdf_o
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Shard GST judgments into individual JSON + PDF files")
-    parser.add_argument("--metadata-dir", default=".data/metadata/raw",
-                        help="Directory containing raw parquet metadata files")
-    parser.add_argument("--judgments-dir", default=".data/GST_judgments",
-                        help="Directory containing zip archives of PDF judgments")
-    parser.add_argument("--output-dir", default=".data/metadata/processed",
-                        help="Directory to write individual JSON files")
-    parser.add_argument("--pdf-output-dir", default=".data/gst_pdfs",
-                        help="Directory to extract individual PDF files")
-    parser.add_argument("--workers", type=int, default=min(9, os.cpu_count() or 1),
-                        help="Number of parallel workers (default: min(9, cpu_count))")
+    parser = argparse.ArgumentParser(
+        description="Shard GST judgments into individual JSON + PDF files"
+    )
+    parser.add_argument(
+        "--metadata-dir",
+        default=".data/metadata/raw",
+        help="Directory containing raw parquet metadata files",
+    )
+    parser.add_argument(
+        "--judgments-dir",
+        default=".data/GST_judgments",
+        help="Directory containing zip archives of PDF judgments",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=".data/metadata/processed",
+        help="Directory to write individual JSON files",
+    )
+    parser.add_argument(
+        "--pdf-output-dir",
+        default=".data/gst_pdfs",
+        help="Directory to extract individual PDF files",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(9, os.cpu_count() or 1),
+        help="Number of parallel workers (default: min(9, cpu_count))",
+    )
     args = parser.parse_args()
 
     process_and_shard_data(

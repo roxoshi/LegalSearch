@@ -1,6 +1,5 @@
 """Tests for conversion_fidelity module."""
 
-import pytest
 from pipelines.conversion_fidelity import (
     ARTIFACT_PATTERNS,
     FALSE_HEADING_PATTERNS,
@@ -11,10 +10,10 @@ from pipelines.conversion_fidelity import (
     score_conversion_from_file,
 )
 
-
 # ---------------------------------------------------------------------------
 # FidelityReport
 # ---------------------------------------------------------------------------
+
 
 class TestFidelityReport:
     def test_overall_score_weighted_average(self):
@@ -62,6 +61,7 @@ class TestFidelityReport:
 # ---------------------------------------------------------------------------
 # score_conversion
 # ---------------------------------------------------------------------------
+
 
 class TestScoreConversion:
     def test_empty_html(self):
@@ -151,6 +151,7 @@ class TestScoreConversion:
 # score_conversion_from_file
 # ---------------------------------------------------------------------------
 
+
 class TestScoreConversionFromFile:
     def test_reads_and_scores_file(self, tmp_path):
         html_file = tmp_path / "test.html"
@@ -168,6 +169,7 @@ class TestScoreConversionFromFile:
 # ---------------------------------------------------------------------------
 # Pattern coverage
 # ---------------------------------------------------------------------------
+
 
 class TestPatternCoverage:
     def test_fragmentation_patterns_compile(self):
@@ -191,6 +193,7 @@ class TestPatternCoverage:
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     def test_only_headings_no_paragraphs(self):
         html = "<html><body><h2>HEADING</h2></body></html>"
@@ -198,7 +201,9 @@ class TestEdgeCases:
         assert report.structure_score < 100
 
     def test_unicode_content(self):
-        html = '<html><body><p>Legal text with \u2014 dashes and \u201cquotes\u201d.</p></body></html>'
+        html = (
+            "<html><body><p>Legal text with \u2014 dashes and \u201cquotes\u201d.</p></body></html>"
+        )
         report = score_conversion(html)
         assert report is not None
 

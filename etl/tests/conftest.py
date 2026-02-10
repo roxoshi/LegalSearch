@@ -1,8 +1,9 @@
-import pytest
-from pathlib import Path
-import tempfile
 import shutil
 import sys
+import tempfile
+from pathlib import Path
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -28,5 +29,5 @@ def sample_json_data():
         "decision_date": "2024-01-01",
         "court": "Test Court",
         "case_id": "TEST-001",
-        "text_content": "This is test legal content for the case."
+        "text_content": "This is test legal content for the case.",
     }

@@ -1,11 +1,8 @@
 import argparse
 import json
 import logging
-import os
 from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Tuple, Set
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,7 +12,7 @@ logger = logging.getLogger("filter_judgments")
 
 FilterResult = namedtuple("FilterResult", ["kept", "removed"])
 
-GST_STATUTES_KEYWORDS = ["goods and services", "goods & services"]
+GST_STATUTES_KEYWORDS = ["goods and services", "goods & services", "gst"]
 
 MAX_TEXT_CHARS = 6000
 
@@ -36,6 +33,7 @@ def _load_nlp_model():
         gpu_enabled = False
         try:
             import torch
+
             if torch.cuda.is_available():
                 try:
                     spacy.require_gpu()
@@ -56,6 +54,7 @@ def _load_nlp_model():
             # Model not installed as package, try importing directly
             try:
                 import en_legal_ner_trf
+
                 _nlp = en_legal_ner_trf.load()
                 logger.info(f"Loaded spaCy model via direct import (GPU: {gpu_enabled})")
             except ImportError:
@@ -72,7 +71,7 @@ def _load_nlp_model():
         return None
 
 
-def predict_relevance(text: str) -> Tuple[Set[str], Set[str]]:
+def predict_relevance(text: str) -> tuple[set[str], set[str]]:
     """
     Extract legal entities from text using NER model.
 
@@ -104,13 +103,13 @@ def predict_relevance(text: str) -> Tuple[Set[str], Set[str]]:
     return (extracted_provisions, extracted_statutes)
 
 
-def is_gst_relevant(statutes: Set[str]) -> bool:
+def is_gst_relevant(statutes: set[str]) -> bool:
     """Check if any extracted statute mentions GST."""
     statutes_text = " ".join(statutes).lower()
     return any(kw in statutes_text for kw in GST_STATUTES_KEYWORDS)
 
 
-def _classify_file(json_file: Path, pdf_path: Path, seed=None):
+def _classify_file(json_file: Path, pdf_path: Path, seed=None):  # noqa: ARG001
     """Classify a single JSON file and update it with extracted entities.
 
     Returns (json_file, stem, action, pdf_file, updated_data).
@@ -118,7 +117,7 @@ def _classify_file(json_file: Path, pdf_path: Path, seed=None):
     """
     stem = json_file.stem
 
-    with open(json_file, "r", encoding="utf-8") as f:
+    with open(json_file, encoding="utf-8") as f:
         data = json.load(f)
 
     text = (data.get("text_content") or "")[:MAX_TEXT_CHARS]
@@ -126,9 +125,9 @@ def _classify_file(json_file: Path, pdf_path: Path, seed=None):
     relevance = is_gst_relevant(extracted_statutes)
 
     # Add new fields to the data dict
-    data['is_gst_core'] = relevance
-    data['extracted_provisions'] = sorted(list(extracted_provisions))
-    data['extracted_statutes'] = sorted(list(extracted_statutes))
+    data["is_gst_core"] = relevance
+    data["extracted_provisions"] = sorted(extracted_provisions)
+    data["extracted_statutes"] = sorted(extracted_statutes)
 
     pdf_file = pdf_path / f"{stem}.pdf"
     action = "keep" if relevance else "remove"
@@ -136,7 +135,7 @@ def _classify_file(json_file: Path, pdf_path: Path, seed=None):
     return json_file, stem, action, pdf_file, data
 
 
-def filter_judgments(processed_dir, pdf_dir, seed=None, workers=None) -> FilterResult:
+def filter_judgments(processed_dir, pdf_dir, seed=None, workers=None) -> FilterResult:  # noqa: ARG001
     """Walk processed JSON files and remove cases the classifier flags as irrelevant.
 
     Uses ML-based NER to extract legal entities and determine GST relevance.
@@ -180,15 +179,14 @@ def filter_judgments(processed_dir, pdf_dir, seed=None, workers=None) -> FilterR
 
     logger.info(
         "Filter complete: kept=%d, removed=%d",
-        kept, removed,
+        kept,
+        removed,
     )
     return FilterResult(kept=kept, removed=removed)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Filter sharded judgments using ML classifier"
-    )
+    parser = argparse.ArgumentParser(description="Filter sharded judgments using ML classifier")
     parser.add_argument(
         "--processed-dir",
         default=".data/metadata/processed",

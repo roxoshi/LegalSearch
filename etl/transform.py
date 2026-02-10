@@ -1,36 +1,37 @@
-
-import sys
-import os
 import logging
-from typing import List, Tuple
+import os
+import sys
 from pathlib import Path
 
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipelines.convert_pdf import convert_pdf_to_html
+
 try:
-    from backend.app.models import Document, DocumentChunk
     from backend.app.chunk_generator import RecursiveCharacterTextSplitter
+    from backend.app.models import Document, DocumentChunk
 except ImportError:
-    from app.models import Document, DocumentChunk
-    from app.chunk_generator import RecursiveCharacterTextSplitter
+    from app.chunk_generator import RecursiveCharacterTextSplitter  # type: ignore[no-redef]
+    from app.models import Document, DocumentChunk  # type: ignore[no-redef]
 from sentence_transformers import SentenceTransformer
+
 from etl.schemas import DocumentJSON
 
 logger = logging.getLogger(__name__)
+
 
 class Transformer:
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         logger.info(f"Loading embedding model: {model_name}")
         self.model = SentenceTransformer(model_name)
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=4000,
-            chunk_overlap=600,
-            separators=["\n\n", "\n", ".", " ", ""]
+            chunk_size=4000, chunk_overlap=600, separators=["\n\n", "\n", ".", " ", ""]
         )
 
-    def process_document(self, doc_json: DocumentJSON, pdf_path: Path) -> Tuple[Document, List[DocumentChunk]]:
+    def process_document(
+        self, doc_json: DocumentJSON, pdf_path: Path
+    ) -> tuple[Document, list[DocumentChunk]]:
         """
         Transforms raw JSON + PDF into Database Models (Document + Chunks).
         1. Convert PDF to HTML (Display Content).
@@ -39,7 +40,7 @@ class Transformer:
         4. Generate embeddings.
         5. Create DocumentChunk models.
         """
-        
+
         # 1. PDF Conversion
         display_html = None
         if pdf_path.exists():
@@ -79,21 +80,19 @@ class Transformer:
             return db_doc, []
 
         chunks_text = self.text_splitter.split_text(doc_json.text_content)
-        
+
         # 4. Embedding
         if chunks_text:
             embeddings = self.model.encode(chunks_text)
         else:
-            embeddings = []
+            embeddings = None
 
         # 5. Create Chunk Models
         db_chunks = []
-        for i, text in enumerate(chunks_text):
-            chunk_embedding = embeddings[i].tolist()
-            db_chunk = DocumentChunk(
-                chunk_content=text,
-                embedding=chunk_embedding
-            )
-            db_chunks.append(db_chunk)
+        if embeddings is not None:
+            for i, text in enumerate(chunks_text):
+                chunk_embedding = embeddings[i].tolist()
+                db_chunk = DocumentChunk(chunk_content=text, embedding=chunk_embedding)
+                db_chunks.append(db_chunk)
 
         return db_doc, db_chunks

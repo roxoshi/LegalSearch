@@ -1,4 +1,4 @@
-from typing import List, Iterable
+from collections.abc import Iterable
 
 
 class RecursiveCharacterTextSplitter:
@@ -16,18 +16,12 @@ class RecursiveCharacterTextSplitter:
         self.chunk_overlap = chunk_overlap
         self.keep_separator = keep_separator
 
-        self.separators = list(separators) if separators else [
-            "\n\n",
-            "\n",
-            ". ",
-            " ",
-            ""
-        ]
+        self.separators = list(separators) if separators else ["\n\n", "\n", ". ", " ", ""]
 
-    def split_text(self, text: str) -> List[str]:
+    def split_text(self, text: str) -> list[str]:
         return self._split_recursive(text, self.separators)
 
-    def _split_recursive(self, text: str, separators: List[str]) -> List[str]:
+    def _split_recursive(self, text: str, separators: list[str]) -> list[str]:
         if len(text) <= self.chunk_size:
             return [text]
 
@@ -52,7 +46,7 @@ class RecursiveCharacterTextSplitter:
 
         return self._merge_splits(final_chunks)
 
-    def _split_with_separator(self, text: str, sep: str) -> List[str]:
+    def _split_with_separator(self, text: str, sep: str) -> list[str]:
         if self.keep_separator:
             parts = text.split(sep)
             splits = []
@@ -65,7 +59,7 @@ class RecursiveCharacterTextSplitter:
         else:
             return text.split(sep)
 
-    def _merge_splits(self, splits: List[str]) -> List[str]:
+    def _merge_splits(self, splits: list[str]) -> list[str]:
         chunks = []
         current = ""
 
@@ -85,14 +79,14 @@ class RecursiveCharacterTextSplitter:
 
         return chunks
 
-    def _add_overlap(self, chunks: List[str]) -> List[str]:
+    def _add_overlap(self, chunks: list[str]) -> list[str]:
         overlapped = []
         for i, chunk in enumerate(chunks):
             if i == 0:
                 overlapped.append(chunk)
                 continue
 
-            overlap = overlapped[-1][-self.chunk_overlap:]
+            overlap = overlapped[-1][-self.chunk_overlap :]
             overlapped.append(overlap + chunk)
 
         return overlapped

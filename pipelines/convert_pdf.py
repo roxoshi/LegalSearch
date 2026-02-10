@@ -1,11 +1,12 @@
 import argparse
-import fitz
-import os
 import logging
+import os
 import re
-from pathlib import Path
-from bs4 import BeautifulSoup
 from collections import defaultdict
+from pathlib import Path
+
+import fitz
+from bs4 import BeautifulSoup
 
 # logging
 logging.basicConfig(
@@ -16,25 +17,50 @@ logger = logging.getLogger("pdf_conversion")
 
 
 # Legitimate section headings in legal documents
-HEADING_KEYWORDS = frozenset([
-    "judgment", "order", "headnote", "factual matrix", "facts",
-    "issue for consideration", "issues for consideration",
-    "case law cited", "appearances for parties", "appearances",
-    "list of acts", "list of keywords", "case arising from",
-    "books and periodicals cited", "conclusion", "arguments",
-    "submissions", "analysis", "discussion", "background",
-    "ratio decidendi", "obiter dicta", "operative part",
-    "prayer", "relief", "decree", "result", "decision",
-])
+HEADING_KEYWORDS = frozenset(
+    [
+        "judgment",
+        "order",
+        "headnote",
+        "factual matrix",
+        "facts",
+        "issue for consideration",
+        "issues for consideration",
+        "case law cited",
+        "appearances for parties",
+        "appearances",
+        "list of acts",
+        "list of keywords",
+        "case arising from",
+        "books and periodicals cited",
+        "conclusion",
+        "arguments",
+        "submissions",
+        "analysis",
+        "discussion",
+        "background",
+        "ratio decidendi",
+        "obiter dicta",
+        "operative part",
+        "prayer",
+        "relief",
+        "decree",
+        "result",
+        "decision",
+    ]
+)
 
 # Patterns that should NEVER be headings
 NON_HEADING_PATTERNS = [
-    re.compile(r'^\[.*(?:JJ?\.?|JUSTICE|Judge).*\]$', re.IGNORECASE),  # Judge names
-    re.compile(r'^\(.*(?:Appeal|Petition|Writ|Case).*\d+.*\)$', re.IGNORECASE),  # Case numbers
-    re.compile(r'\bv\.?\s*$', re.IGNORECASE),  # Party name ending with "v."
-    re.compile(r'^[A-Z]\.$'),  # Single letter with period
-    re.compile(r'^\d+\.$'),  # Numbered items
-    re.compile(r'^(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d', re.IGNORECASE),  # Dates
+    re.compile(r"^\[.*(?:JJ?\.?|JUSTICE|Judge).*\]$", re.IGNORECASE),  # Judge names
+    re.compile(r"^\(.*(?:Appeal|Petition|Writ|Case).*\d+.*\)$", re.IGNORECASE),  # Case numbers
+    re.compile(r"\bv\.?\s*$", re.IGNORECASE),  # Party name ending with "v."
+    re.compile(r"^[A-Z]\.$"),  # Single letter with period
+    re.compile(r"^\d+\.$"),  # Numbered items
+    re.compile(
+        r"^(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d",
+        re.IGNORECASE,
+    ),  # Dates
 ]
 
 
@@ -43,15 +69,17 @@ def analyze_marker_columns(doc):
     Pass 1: Scan the entire document to identify vertical bands (columns)
     where single-character junk markers (A-H) frequently appear.
     """
-    bins = defaultdict(int)
+    bins: dict[int, int] = defaultdict(int)
     page_count = len(doc)
 
     for page in doc:
         blocks = page.get_text("dict")["blocks"]
         for b in blocks:
             if b["type"] == 0:
-                text = "".join("".join(s["text"] for s in l["spans"]) for l in b["lines"]).strip()
-                if len(text) == 1 and text.upper() in 'ABCDEFGH':
+                text = "".join(
+                    "".join(s["text"] for s in line["spans"]) for line in b["lines"]
+                ).strip()
+                if len(text) == 1 and text.upper() in "ABCDEFGH":
                     x_center = (b["bbox"][0] + b["bbox"][2]) / 2
                     bin_idx = int(x_center // 5) * 5
                     bins[bin_idx] += 1
@@ -65,15 +93,15 @@ def clean_text(text):
     """Clean and normalize extracted text."""
     # Unicode replacements using escape sequences
     replacements = {
-        "\u2013": "-",      # en-dash
-        "\u2014": "--",     # em-dash
-        "\u201c": '"',      # left double quote
-        "\u201d": '"',      # right double quote
-        "\u2018": "'",      # left single quote
-        "\u2019": "'",      # right single quote
-        "\u2026": "...",    # ellipsis
-        "\u00c2": "",       # Â artifact
-        "\u2020": "",       # dagger
+        "\u2013": "-",  # en-dash
+        "\u2014": "--",  # em-dash
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote
+        "\u2026": "...",  # ellipsis
+        "\u00c2": "",  # Â artifact
+        "\u2020": "",  # dagger
     }
     for bad, good in replacements.items():
         text = text.replace(bad, good)
@@ -83,8 +111,8 @@ def clean_text(text):
 def fix_text_artifacts(text):
     """Post-process text to fix common extraction artifacts."""
     # Fix merged "of" with year: "of2016" -> "of 2016"
-    text = re.sub(r'\bof(\d{4})\b', r'of \1', text)
-    text = re.sub(r'\b(\d{4})of\b', r'\1 of', text)
+    text = re.sub(r"\bof(\d{4})\b", r"of \1", text)
+    text = re.sub(r"\b(\d{4})of\b", r"\1 of", text)
 
     # Fix common OCR errors
     text = re.sub(r"n'o\b", "no", text)
@@ -94,23 +122,23 @@ def fix_text_artifacts(text):
     text = re.sub(r"fude", "facie", text)  # prima fude -> prima facie
 
     # Fix broken hyphenation (word- continuation)
-    text = re.sub(r'(\w)-\s+(\w)', r'\1\2', text)
+    text = re.sub(r"(\w)-\s+(\w)", r"\1\2", text)
 
     # Remove isolated margin markers (A-H) that appear between words
     # Match: word boundary, space, single A-H letter, space, word boundary
-    text = re.sub(r'(?<=\s)[A-H](?=\s+[A-Za-z])', '', text)
+    text = re.sub(r"(?<=\s)[A-H](?=\s+[A-Za-z])", "", text)
     # Also at start of text
-    text = re.sub(r'^[A-H]\s+(?=[A-Za-z])', '', text)
+    text = re.sub(r"^[A-H]\s+(?=[A-Za-z])", "", text)
 
     # Fix possessive apostrophes
     text = re.sub(r"(\w)[''`]s\b", r"\1's", text)
     text = re.sub(r"(\w)'\.", r"\1's", text)  # respondent'. -> respondent's
 
     # Remove isolated page numbers like "133", "135" at end of paragraph
-    text = re.sub(r'\s+\d{2,3}\s*$', '', text)
+    text = re.sub(r"\s+\d{2,3}\s*$", "", text)
 
     # Clean up multiple spaces
-    text = re.sub(r'\s{2,}', ' ', text)
+    text = re.sub(r"\s{2,}", " ", text)
 
     return text.strip()
 
@@ -128,10 +156,7 @@ def is_header_footer(text, bbox, page_height):
         return True
 
     y0, y1 = bbox[1], bbox[3]
-    if y1 < page_height * 0.12 or y0 > page_height * 0.92:
-        if len(stripped_text) < 140:
-            return True
-    return False
+    return bool((y1 < page_height * 0.12 or y0 > page_height * 0.92) and len(stripped_text) < 140)
 
 
 def is_margin_junk(text, bbox, marker_columns):
@@ -178,7 +203,7 @@ def is_valid_heading(text, is_bold, bbox, page_height):
         if pattern.search(stripped):
             return False
 
-    upper_text = stripped.upper()
+    stripped.upper()
     lower_text = stripped.lower()
 
     # Check for heading keywords
@@ -190,14 +215,12 @@ def is_valid_heading(text, is_bold, bbox, page_height):
         # But filter out things that look like party names
         if " v. " in stripped or " V. " in stripped:
             return False
-        if stripped.endswith(", JJ.]") or "JUSTICE" in stripped:
-            return False
-        return True
+        return not (stripped.endswith(", JJ.]") or "JUSTICE" in stripped)
 
     return False
 
 
-def should_merge_blocks(prev_text, curr_text, curr_starts_lower):
+def should_merge_blocks(prev_text, _curr_text, curr_starts_lower):
     """
     Determine if two blocks should be merged into one paragraph.
 
@@ -221,10 +244,7 @@ def should_merge_blocks(prev_text, curr_text, curr_starts_lower):
         return True
 
     # If current starts lowercase, it's likely a continuation
-    if curr_starts_lower:
-        return True
-
-    return False
+    return bool(curr_starts_lower)
 
 
 def merge_line_spans(line_spans):
@@ -298,16 +318,18 @@ def extract_blocks_from_page(page, marker_columns):
 
         # Filter out isolated single letters that leaked through
         # (margin markers that weren't in known columns)
-        if len(cleaned_text) == 1 and cleaned_text.upper() in 'ABCDEFGH':
+        if len(cleaned_text) == 1 and cleaned_text.upper() in "ABCDEFGH":
             continue
 
-        structured.append({
-            "text": cleaned_text,
-            "spans": block_spans,
-            "is_bold": block_is_bold,
-            "is_heading": is_valid_heading(cleaned_text, block_is_bold, b["bbox"], page_height),
-            "bbox": b["bbox"],
-        })
+        structured.append(
+            {
+                "text": cleaned_text,
+                "spans": block_spans,
+                "is_bold": block_is_bold,
+                "is_heading": is_valid_heading(cleaned_text, block_is_bold, b["bbox"], page_height),
+                "bbox": b["bbox"],
+            }
+        )
 
     return structured
 
@@ -328,10 +350,12 @@ def merge_paragraphs(blocks):
             if current_para:
                 merged.append(current_para)
                 current_para = None
-            merged.append({
-                "type": "heading",
-                "text": block["text"],
-            })
+            merged.append(
+                {
+                    "type": "heading",
+                    "text": block["text"],
+                }
+            )
             continue
 
         # Determine if this should merge with previous
@@ -365,9 +389,10 @@ def merge_paragraphs(blocks):
 def build_html(elements):
     """Construct HTML from merged elements."""
     soup = BeautifulSoup(
-        "<html><head><meta charset='utf-8'></head><body></body></html>",
-        "html.parser"
+        "<html><head><meta charset='utf-8'></head><body></body></html>", "html.parser"
     )
+    assert soup.head is not None
+    assert soup.body is not None
     body = soup.body
 
     # CSS styles
@@ -486,5 +511,5 @@ def main():
     logger.info(f"Conversion complete. HTMLs written at: {args.output_dir}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

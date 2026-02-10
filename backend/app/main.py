@@ -1,16 +1,16 @@
-from typing import List
 import os
-
-from fastapi import FastAPI, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from sentence_transformers import SentenceTransformer
-from fastapi.middleware.cors import CORSMiddleware
-from .database import get_database, engine
 from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from sentence_transformers import SentenceTransformer
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from . import models
-from .models import Document, DocumentChunk
 from .custom_types import SearchResult
+from .database import engine, get_database
+from .models import Document, DocumentChunk
 
 app = FastAPI()
 
@@ -44,14 +44,17 @@ embed_model = SentenceTransformer(os.getenv("MODEL_NAME", "sentence-transformers
 async def lifespan(app):
     models.Base.metadata.create_all(bind=engine)
 
+
 @app.get("/search")
-def vector_search(q: str = Query(...),
-                  court: str = Query(None),
-                  year: str = Query(None),
-                  judge: str = Query(None),
-                  is_gst: str = Query(None),
-                  decision_date: str = Query(None),
-                  db: Session = Depends(get_database)) -> List[SearchResult]:
+def vector_search(
+    q: str = Query(...),
+    court: str = Query(None),
+    year: str = Query(None),
+    judge: str = Query(None),
+    is_gst: str = Query(None),
+    decision_date: str = Query(None),
+    db: Session = Depends(get_database),
+) -> list[SearchResult]:
     query_vector = embed_model.encode(q).tolist()
 
     # Base statement joining DocumentChunk and Document
@@ -67,19 +70,15 @@ def vector_search(q: str = Query(...),
     if judge:
         stmt = stmt.where(Document.judge.ilike(f"%{judge}%"))
 
-    if is_gst is not None and is_gst.lower() in ('true', 'false', 'yes', 'no'):
-        is_gst_value = is_gst.lower() in ('true', 'yes')
+    if is_gst is not None and is_gst.lower() in ("true", "false", "yes", "no"):
+        is_gst_value = is_gst.lower() in ("true", "yes")
         stmt = stmt.where(Document.is_gst_core == is_gst_value)
 
     if decision_date:
         stmt = stmt.where(Document.decision_date.like(f"{decision_date}%"))
 
     # Fetch more candidates to ensure we find unique documents
-    stmt = (
-        stmt
-        .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
-        .limit(50)
-    )
+    stmt = stmt.order_by(DocumentChunk.embedding.cosine_distance(query_vector)).limit(50)
 
     results = db.execute(stmt).all()
 
@@ -96,15 +95,16 @@ def vector_search(q: str = Query(...),
                     title=doc.title,
                     citation=doc.citation,
                     content=chunk.chunk_content,
-                    rrf_score=0.0
+                    rrf_score=0.0,
                 )
             )
             seen_doc_ids.add(doc.id)
-            
+
             if len(search_results) >= 5:
                 break
-                
+
     return search_results
+
 
 @app.get("/document/{id}")
 def get_document(id: int, db: Session = Depends(get_database)):

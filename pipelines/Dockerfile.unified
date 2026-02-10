@@ -7,12 +7,6 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# Fix version compatibility - all these versions work together
-RUN pip install --no-cache-dir \
-    "huggingface_hub>=0.14.0,<0.17.0" \
-    "transformers>=4.28.0,<4.31.0" \
-    "sentence-transformers>=2.2.0,<2.3.0"
-
 # Just copy application code - all dependencies are in base image
 COPY backend/app /app/app
 COPY pipelines /app/pipelines

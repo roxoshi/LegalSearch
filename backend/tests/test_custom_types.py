@@ -10,9 +10,9 @@ def test_search_result_creation():
         title="Test Case",
         citation="2024 TEST 1",
         content="Test content",
-        rrf_score=0.95
+        rrf_score=0.95,
     )
-    
+
     assert result.id == 1
     assert result.chunk_id == 10
     assert result.case_id == "TEST-001"
@@ -31,13 +31,13 @@ def test_search_result_fields():
         title="Title",
         citation="Citation",
         content="Content",
-        rrf_score=0.5
+        rrf_score=0.5,
     )
-    
-    assert hasattr(result, 'id')
-    assert hasattr(result, 'chunk_id')
-    assert hasattr(result, 'case_id')
-    assert hasattr(result, 'title')
-    assert hasattr(result, 'citation')
-    assert hasattr(result, 'content')
-    assert hasattr(result, 'rrf_score')
+
+    assert hasattr(result, "id")
+    assert hasattr(result, "chunk_id")
+    assert hasattr(result, "case_id")
+    assert hasattr(result, "title")
+    assert hasattr(result, "citation")
+    assert hasattr(result, "content")
+    assert hasattr(result, "rrf_score")

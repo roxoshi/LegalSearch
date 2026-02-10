@@ -1,15 +1,19 @@
-import pytest
 import os
+
+import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
+
 from app.models import Base, Document, DocumentChunk
 
 
 def is_postgres_available():
     """Check if PostgreSQL test database is available"""
     try:
-        test_url = os.getenv("DATABASE_URL", "postgresql://testuser:testpass@localhost:5433/legalsearch_test")
+        test_url = os.getenv(
+            "DATABASE_URL", "postgresql://testuser:testpass@localhost:5433/legalsearch_test"
+        )
         engine = create_engine(test_url)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -26,24 +30,28 @@ def postgres_db():
     Skips if PostgreSQL is not available.
     """
     if not is_postgres_available():
-        pytest.skip("PostgreSQL test database not available. Run: docker-compose -f docker-compose.test.yml up -d")
-    
+        pytest.skip(
+            "PostgreSQL test database not available. Run: docker-compose -f docker-compose.test.yml up -d"
+        )
+
     # Create engine for PostgreSQL
-    test_url = os.getenv("DATABASE_URL", "postgresql://testuser:testpass@localhost:5433/legalsearch_test")
+    test_url = os.getenv(
+        "DATABASE_URL", "postgresql://testuser:testpass@localhost:5433/legalsearch_test"
+    )
     engine = create_engine(test_url)
-    
+
     # Create tables
     Base.metadata.create_all(engine)
-    
+
     # Create session
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
-    
+
     yield session
-    
+
     # Cleanup
     session.close()
-    
+
     # Drop all tables
     Base.metadata.drop_all(engine)
     engine.dispose()
@@ -62,7 +70,7 @@ def postgres_sample_document(postgres_db):
         court="Supreme Court",
         case_id="TEST-2024-001",
         content="This is test content for the legal case.",
-        display_content="<p>This is test content for the legal case.</p>"
+        display_content="<p>This is test content for the legal case.</p>",
     )
     postgres_db.add(doc)
     postgres_db.commit()
@@ -75,11 +83,11 @@ def postgres_sample_chunk(postgres_db, postgres_sample_document):
     """Create a sample chunk with embedding in PostgreSQL"""
     # Create a simple embedding vector (384 dimensions for all-MiniLM-L6-v2)
     embedding = [0.1] * 384
-    
+
     chunk = DocumentChunk(
         document_id=postgres_sample_document.id,
         chunk_content="This is test content for the legal case.",
-        embedding=embedding
+        embedding=embedding,
     )
     postgres_db.add(chunk)
     postgres_db.commit()

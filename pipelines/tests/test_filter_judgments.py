@@ -1,21 +1,19 @@
 """Tests for filter_judgments module with ML-based classification."""
 
 import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pipelines.filter_judgments import (
-    MAX_TEXT_CHARS,
     GST_STATUTES_KEYWORDS,
+    MAX_TEXT_CHARS,
     FilterResult,
     _classify_file,
     filter_judgments,
+    is_gst_relevant,
     main,
     predict_relevance,
-    is_gst_relevant,
-    _load_nlp_model,
 )
 
 
@@ -44,13 +42,12 @@ def dirs(tmp_path):
 # predict_relevance (with mocked NLP)
 # ---------------------------------------------------------------------------
 
+
 class TestPredictRelevance:
     def test_fallback_when_no_ml_model(self):
         """When ML model unavailable, uses keyword fallback."""
         with patch("pipelines.filter_judgments._load_nlp_model", return_value=None):
-            provisions, statutes = predict_relevance(
-                "This case involves goods and services tax."
-            )
+            provisions, statutes = predict_relevance("This case involves goods and services tax.")
             assert len(statutes) > 0
             assert provisions == set()
 
@@ -84,6 +81,7 @@ class TestPredictRelevance:
 # is_gst_relevant
 # ---------------------------------------------------------------------------
 
+
 class TestIsGstRelevant:
     def test_gst_keyword_match(self):
         assert is_gst_relevant({"Central Goods and Services Tax Act"})
@@ -99,6 +97,7 @@ class TestIsGstRelevant:
 # ---------------------------------------------------------------------------
 # _classify_file
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyFile:
     def test_classify_relevant_case(self, dirs):
@@ -145,6 +144,7 @@ class TestClassifyFile:
 # ---------------------------------------------------------------------------
 # filter_judgments
 # ---------------------------------------------------------------------------
+
 
 class TestFilterJudgments:
     def test_keeps_gst_cases(self, dirs):
@@ -248,12 +248,14 @@ class TestFilterJudgments:
 # _load_nlp_model
 # ---------------------------------------------------------------------------
 
+
 class TestLoadNlpModel:
     def test_returns_none_when_imports_fail(self):
         """When torch/spacy not installed, returns None gracefully."""
         with patch.dict("sys.modules", {"torch": None, "spacy": None}):
             # Reset the cached model
             import pipelines.filter_judgments as fm
+
             fm._nlp = None
 
             with patch("pipelines.filter_judgments._load_nlp_model") as mock_load:
@@ -266,22 +268,27 @@ class TestLoadNlpModel:
 # main() CLI
 # ---------------------------------------------------------------------------
 
+
 class TestMainCli:
     def test_main_with_args(self, dirs):
         processed, pdfs = dirs
         _make_case(processed, pdfs, "cli_gst", "goods and services tax")
         _make_case(processed, pdfs, "cli_other", "income tax")
 
-        with patch("pipelines.filter_judgments._load_nlp_model", return_value=None):
-            with patch(
+        with (
+            patch("pipelines.filter_judgments._load_nlp_model", return_value=None),
+            patch(
                 "sys.argv",
                 [
                     "filter_judgments",
-                    "--processed-dir", str(processed),
-                    "--pdf-dir", str(pdfs),
+                    "--processed-dir",
+                    str(processed),
+                    "--pdf-dir",
+                    str(pdfs),
                 ],
-            ):
-                main()
+            ),
+        ):
+            main()
 
         remaining = list(processed.rglob("*.json"))
         assert len(remaining) == 1
@@ -292,21 +299,26 @@ class TestMainCli:
         pdfs = tmp_path / "pdfs"
         pdfs.mkdir()
 
-        with patch("pipelines.filter_judgments._load_nlp_model", return_value=None):
-            with patch(
+        with (
+            patch("pipelines.filter_judgments._load_nlp_model", return_value=None),
+            patch(
                 "sys.argv",
                 [
                     "filter_judgments",
-                    "--processed-dir", str(processed),
-                    "--pdf-dir", str(pdfs),
+                    "--processed-dir",
+                    str(processed),
+                    "--pdf-dir",
+                    str(pdfs),
                 ],
-            ):
-                main()
+            ),
+        ):
+            main()
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 class TestConstants:
     def test_gst_keywords_present(self):

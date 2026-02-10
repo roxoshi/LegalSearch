@@ -21,6 +21,15 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Source environment file
+ENV_FILE="${ENV_FILE:-envs/.env.staging}"
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading environment from $ENV_FILE"
+    set -a; source "$ENV_FILE"; set +a
+else
+    echo -e "${YELLOW}Warning: $ENV_FILE not found. Using defaults or existing environment.${NC}"
+fi
+
 # Parse arguments
 BATCH_SIZE=${BATCH_SIZE:-50}
 LIMIT=${LIMIT:-0}
@@ -54,7 +63,7 @@ echo -e "\n${GREEN}[1/2] Ensuring database is running...${NC}"
 docker compose up -d db
 
 echo "Waiting for PostgreSQL..."
-until docker compose exec -T db pg_isready -U user -d search_db > /dev/null 2>&1; do
+until docker compose exec -T db pg_isready -U "${POSTGRES_USER:-user}" -d "${POSTGRES_DB:-search_db}" > /dev/null 2>&1; do
     sleep 2
 done
 echo "Database ready!"

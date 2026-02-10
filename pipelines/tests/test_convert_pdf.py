@@ -1,27 +1,23 @@
 """Tests for convert_pdf module."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from pipelines.convert_pdf import (
     HEADING_KEYWORDS,
     NON_HEADING_PATTERNS,
-    analyze_marker_columns,
+    build_html,
     clean_text,
+    convert_bulk_htmls,
+    convert_pdf_to_html,
     fix_text_artifacts,
     is_header_footer,
     is_margin_junk,
     is_valid_heading,
-    should_merge_blocks,
-    merge_line_spans,
-    extract_blocks_from_page,
-    merge_paragraphs,
-    build_html,
-    convert_pdf_to_html,
-    convert_bulk_htmls,
     main,
+    merge_line_spans,
+    merge_paragraphs,
+    should_merge_blocks,
 )
 
 
@@ -40,7 +36,7 @@ def _make_block(text, bbox=(60, 200, 400, 220), bold=False):
                     }
                 ]
             }
-        ]
+        ],
     }
 
 
@@ -55,6 +51,7 @@ def _make_mock_page(blocks, page_height=792):
 # ---------------------------------------------------------------------------
 # clean_text
 # ---------------------------------------------------------------------------
+
 
 class TestCleanText:
     def test_normalizes_unicode_dashes(self):
@@ -76,6 +73,7 @@ class TestCleanText:
 # ---------------------------------------------------------------------------
 # fix_text_artifacts
 # ---------------------------------------------------------------------------
+
 
 class TestFixTextArtifacts:
     def test_fixes_merged_of_year(self):
@@ -105,6 +103,7 @@ class TestFixTextArtifacts:
 # is_header_footer
 # ---------------------------------------------------------------------------
 
+
 class TestIsHeaderFooter:
     def test_filters_page_numbers(self):
         assert is_header_footer("123", (0, 0, 50, 20), 792)
@@ -127,6 +126,7 @@ class TestIsHeaderFooter:
 # is_margin_junk
 # ---------------------------------------------------------------------------
 
+
 class TestIsMarginJunk:
     def test_filters_single_letter_in_marker_column(self):
         marker_columns = [25]
@@ -148,6 +148,7 @@ class TestIsMarginJunk:
 # ---------------------------------------------------------------------------
 # is_valid_heading
 # ---------------------------------------------------------------------------
+
 
 class TestIsValidHeading:
     def test_recognizes_judgment_heading(self):
@@ -186,6 +187,7 @@ class TestIsValidHeading:
 # should_merge_blocks
 # ---------------------------------------------------------------------------
 
+
 class TestShouldMergeBlocks:
     def test_merges_incomplete_sentence(self):
         assert should_merge_blocks("The court held that", "the appellant", False)
@@ -203,6 +205,7 @@ class TestShouldMergeBlocks:
 # ---------------------------------------------------------------------------
 # merge_line_spans
 # ---------------------------------------------------------------------------
+
 
 class TestMergeLineSpans:
     def test_merges_adjacent_same_format(self):
@@ -232,6 +235,7 @@ class TestMergeLineSpans:
 # merge_paragraphs
 # ---------------------------------------------------------------------------
 
+
 class TestMergeParagraphs:
     def test_separates_headings(self):
         blocks = [
@@ -245,8 +249,16 @@ class TestMergeParagraphs:
 
     def test_merges_continuous_text(self):
         blocks = [
-            {"text": "First part of", "spans": [[{"text": "First part of", "is_bold": False}]], "is_heading": False},
-            {"text": "the sentence.", "spans": [[{"text": "the sentence.", "is_bold": False}]], "is_heading": False},
+            {
+                "text": "First part of",
+                "spans": [[{"text": "First part of", "is_bold": False}]],
+                "is_heading": False,
+            },
+            {
+                "text": "the sentence.",
+                "spans": [[{"text": "the sentence.", "is_bold": False}]],
+                "is_heading": False,
+            },
         ]
         merged = merge_paragraphs(blocks)
         assert len(merged) == 1
@@ -258,11 +270,16 @@ class TestMergeParagraphs:
 # build_html
 # ---------------------------------------------------------------------------
 
+
 class TestBuildHtml:
     def test_creates_valid_html_structure(self):
         elements = [
             {"type": "heading", "text": "JUDGMENT"},
-            {"type": "paragraph", "text": "Content", "spans": [[{"text": "Content", "is_bold": False}]]},
+            {
+                "type": "paragraph",
+                "text": "Content",
+                "spans": [[{"text": "Content", "is_bold": False}]],
+            },
         ]
         html = build_html(elements)
         assert "<html>" in html
@@ -272,7 +289,11 @@ class TestBuildHtml:
 
     def test_includes_bold_tags(self):
         elements = [
-            {"type": "paragraph", "text": "Bold text", "spans": [[{"text": "Bold text", "is_bold": True}]]},
+            {
+                "type": "paragraph",
+                "text": "Bold text",
+                "spans": [[{"text": "Bold text", "is_bold": True}]],
+            },
         ]
         html = build_html(elements)
         assert "<strong>" in html
@@ -282,9 +303,10 @@ class TestBuildHtml:
 # convert_pdf_to_html
 # ---------------------------------------------------------------------------
 
+
 class TestConvertPdfToHtml:
     def test_returns_string(self):
-        with patch('pipelines.convert_pdf.fitz') as mock_fitz:
+        with patch("pipelines.convert_pdf.fitz") as mock_fitz:
             mock_doc = MagicMock()
             mock_page = _make_mock_page([_make_block("Test content.")])
             mock_doc.__iter__ = lambda self: iter([mock_page])
@@ -298,19 +320,21 @@ class TestConvertPdfToHtml:
             assert "Test content" in result
 
     def test_handles_error(self):
-        with patch('pipelines.convert_pdf.fitz') as mock_fitz:
+        with patch("pipelines.convert_pdf.fitz") as mock_fitz:
             mock_fitz.open.side_effect = Exception("File not found")
             result = convert_pdf_to_html(Path("nonexistent.pdf"))
             assert result == ""
 
     def test_filters_headers_footers(self):
-        with patch('pipelines.convert_pdf.fitz') as mock_fitz:
+        with patch("pipelines.convert_pdf.fitz") as mock_fitz:
             mock_doc = MagicMock()
-            mock_page = _make_mock_page([
-                _make_block("Supreme Court Reports", bbox=(60, 10, 400, 30)),
-                _make_block("Actual content.", bbox=(60, 300, 400, 320)),
-                _make_block("123", bbox=(280, 750, 310, 770)),
-            ])
+            mock_page = _make_mock_page(
+                [
+                    _make_block("Supreme Court Reports", bbox=(60, 10, 400, 30)),
+                    _make_block("Actual content.", bbox=(60, 300, 400, 320)),
+                    _make_block("123", bbox=(280, 750, 310, 770)),
+                ]
+            )
             mock_doc.__iter__ = lambda self: iter([mock_page])
             mock_doc.__len__ = lambda self: 1
             mock_fitz.open.return_value = mock_doc
@@ -319,12 +343,14 @@ class TestConvertPdfToHtml:
             assert "Actual content" in result
 
     def test_heading_detection(self):
-        with patch('pipelines.convert_pdf.fitz') as mock_fitz:
+        with patch("pipelines.convert_pdf.fitz") as mock_fitz:
             mock_doc = MagicMock()
-            mock_page = _make_mock_page([
-                _make_block("JUDGMENT", bbox=(60, 200, 400, 220), bold=True),
-                _make_block("The court finds...", bbox=(60, 250, 400, 270)),
-            ])
+            mock_page = _make_mock_page(
+                [
+                    _make_block("JUDGMENT", bbox=(60, 200, 400, 220), bold=True),
+                    _make_block("The court finds...", bbox=(60, 250, 400, 270)),
+                ]
+            )
             mock_doc.__iter__ = lambda self: iter([mock_page])
             mock_doc.__len__ = lambda self: 1
             mock_fitz.open.return_value = mock_doc
@@ -334,22 +360,24 @@ class TestConvertPdfToHtml:
             assert "JUDGMENT" in result
 
     def test_bold_preservation(self):
-        with patch('pipelines.convert_pdf.fitz') as mock_fitz:
+        with patch("pipelines.convert_pdf.fitz") as mock_fitz:
             mock_doc = MagicMock()
-            mock_page = _make_mock_page([
-                {
-                    "type": 0,
-                    "bbox": (60, 300, 400, 320),
-                    "lines": [
-                        {
-                            "spans": [
-                                {"text": "Normal ", "flags": 0, "font": "Regular"},
-                                {"text": "bold", "flags": 16, "font": "Bold"},
-                            ]
-                        }
-                    ]
-                }
-            ])
+            mock_page = _make_mock_page(
+                [
+                    {
+                        "type": 0,
+                        "bbox": (60, 300, 400, 320),
+                        "lines": [
+                            {
+                                "spans": [
+                                    {"text": "Normal ", "flags": 0, "font": "Regular"},
+                                    {"text": "bold", "flags": 16, "font": "Bold"},
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            )
             mock_doc.__iter__ = lambda self: iter([mock_page])
             mock_doc.__len__ = lambda self: 1
             mock_fitz.open.return_value = mock_doc
@@ -362,6 +390,7 @@ class TestConvertPdfToHtml:
 # convert_bulk_htmls
 # ---------------------------------------------------------------------------
 
+
 class TestConvertBulkHtmls:
     def test_creates_output_directory(self, tmp_path):
         source_dir = tmp_path / "source"
@@ -370,7 +399,7 @@ class TestConvertBulkHtmls:
 
         (source_dir / "test.pdf").touch()
 
-        with patch('pipelines.convert_pdf.convert_pdf_to_html') as mock_convert:
+        with patch("pipelines.convert_pdf.convert_pdf_to_html") as mock_convert:
             mock_convert.return_value = "<p>Test</p>"
             convert_bulk_htmls(str(source_dir), str(output_dir))
 
@@ -381,14 +410,15 @@ class TestConvertBulkHtmls:
 # main
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_main_parses_args(self, tmp_path):
         source_dir = tmp_path / "source"
         output_dir = tmp_path / "output"
         source_dir.mkdir()
 
-        with patch('sys.argv', ['convert_pdf', str(source_dir), str(output_dir)]):
-            with patch('pipelines.convert_pdf.convert_bulk_htmls') as mock_convert:
+        with patch("sys.argv", ["convert_pdf", str(source_dir), str(output_dir)]):
+            with patch("pipelines.convert_pdf.convert_bulk_htmls") as mock_convert:
                 main()
                 mock_convert.assert_called_once()
 
@@ -396,6 +426,7 @@ class TestMain:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 class TestConstants:
     def test_heading_keywords_nonempty(self):
