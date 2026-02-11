@@ -6,7 +6,8 @@ requires-python = ">=3.13"
 dependencies = [
     "sqlalchemy",
     "psycopg2-binary",
-    "sentence-transformers",
+    "transformers",
+    "torch",
     "beautifulsoup4",
     "pymupdf", 
     "python-dotenv",

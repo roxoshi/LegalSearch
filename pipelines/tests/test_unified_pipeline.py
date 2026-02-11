@@ -316,7 +316,7 @@ class TestONNXIntegration:
         assert sig.parameters["use_onnx"].default is False
 
     def test_onnx_embedder_encode_interface(self):
-        """Verify ONNXEmbedder has same interface as SentenceTransformer."""
+        """Verify ONNXEmbedder has same interface as EmbeddingModel."""
         import numpy as np
 
         from pipelines.unified_pipeline import ONNXEmbedder

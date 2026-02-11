@@ -1,19 +1,10 @@
-<<<<<<< HEAD
+from datetime import datetime
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 
-from .database import Base
-
-
-=======
-
-from sqlalchemy import Column, Integer, Text, ForeignKey, Boolean, DateTime
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import relationship
-from pgvector.sqlalchemy import Vector
-from datetime import datetime
 from .database import Base
 
 
@@ -29,7 +20,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
 
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
+
 class Document(Base):
     __tablename__ = "documents"
 

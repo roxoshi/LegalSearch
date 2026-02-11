@@ -402,40 +402,35 @@ class TestONNXEmbedder:
 
     def test_encode_returns_list(self):
         """Encode should return list of embeddings."""
-        # Mock the sentence transformer fallback
-        with patch("sentence_transformers.SentenceTransformer") as mock_st:
-            import numpy as np
+        import numpy as np
 
-            mock_model = MagicMock()
-            mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
-            mock_st.return_value = mock_model
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
 
-            embedder = ONNXEmbedder()
-            # Force fallback path
-            embedder._initialized = True
-            embedder._use_onnx = False
-            embedder.model = mock_model
+        embedder = ONNXEmbedder()
+        # Force fallback path
+        embedder._initialized = True
+        embedder._use_onnx = False
+        embedder.model = mock_model
 
-            result = embedder.encode(["text 1", "text 2"])
-            assert isinstance(result, list)
-            assert len(result) == 2
+        result = embedder.encode(["text 1", "text 2"])
+        assert isinstance(result, list)
+        assert len(result) == 2
 
     def test_encode_empty_list(self):
         """Encode empty list should return empty list."""
-        with patch("sentence_transformers.SentenceTransformer") as mock_st:
-            import numpy as np
+        import numpy as np
 
-            mock_model = MagicMock()
-            mock_model.encode.return_value = np.array([])
-            mock_st.return_value = mock_model
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([])
 
-            embedder = ONNXEmbedder()
-            embedder._initialized = True
-            embedder._use_onnx = False
-            embedder.model = mock_model
+        embedder = ONNXEmbedder()
+        embedder._initialized = True
+        embedder._use_onnx = False
+        embedder.model = mock_model
 
-            result = embedder.encode([])
-            assert result == []
+        result = embedder.encode([])
+        assert result == []
 
     def test_onnx_encode_path(self):
         """Test the ONNX encoding path with mocks."""
@@ -495,9 +490,9 @@ class TestONNXEmbedder:
         assert len(result) == 3
 
     def test_ensure_initialized_fallback(self):
-        """Test initialization fallback to SentenceTransformer."""
+        """Test initialization fallback to EmbeddingModel."""
         with patch.dict("sys.modules", {"optimum": None, "optimum.onnxruntime": None}):
-            with patch("sentence_transformers.SentenceTransformer") as mock_st:
+            with patch("app.embeddings.EmbeddingModel") as mock_st:
                 import numpy as np
 
                 mock_model = MagicMock()

@@ -1,43 +1,32 @@
-<<<<<<< HEAD
 import os
-=======
-from typing import List, Optional
-import os
-
-from fastapi import FastAPI, Depends, Query, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from sentence_transformers import SentenceTransformer
-from fastapi.middleware.cors import CORSMiddleware
-from .database import get_database, engine
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from sentence_transformers import SentenceTransformer
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from .embeddings import EmbeddingModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
-<<<<<<< HEAD
+from .auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    Token,
+    UserCreate,
+    UserResponse,
+    authenticate_user,
+    create_access_token,
+    create_user,
+    get_current_user_required,
+    get_google_user_info,
+    get_or_create_google_user,
+    get_user_by_email,
+)
 from .custom_types import SearchResult
 from .database import engine, get_database
-from .models import Document, DocumentChunk
-=======
 from .models import Document, DocumentChunk, User
-from .custom_types import SearchResult
-from .auth import (
-    UserCreate, UserLogin, Token, UserResponse,
-    create_user, authenticate_user, create_access_token,
-    get_user_by_email, get_current_user, get_current_user_required,
-    get_google_user_info, get_or_create_google_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES
-)
-from datetime import timedelta
-from pydantic import BaseModel
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 
 app = FastAPI()
 
@@ -50,21 +39,7 @@ app.add_middleware(
 )
 
 
-# CONFIG = {}
-
-embed_model = SentenceTransformer(os.getenv("MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"))
-
-# MOCK_DOCS = [
-#     {"id": 1, "title": "MLOps Best Practices", "content": "Deployment and monitoring of machine learning models in production."},
-#     {"id": 2, "title": "Vector Databases", "content": "How to store embeddings for efficient similarity search using pgvector."},
-#     {"id": 3, "title": "FastAPI Guide", "content": "Building high-performance web APIs with Python and Pydantic."},
-#     {"id": 4, "title": "Next.js Fundamentals", "content": "Server-side rendering and static site generation for modern web apps."},
-#     {"id": 5, "title": "PostgreSQL Full Text", "content": "Using GIN indexes and tsvectors for fast keyword searching."}
-# ]
-
-# # Pre-calculate embeddings for mock docs
-# doc_texts = [d["content"] for d in MOCK_DOCS]
-# doc_embeddings = embed_model.encode(doc_texts, convert_to_tensor=True)
+embed_model = EmbeddingModel(os.getenv("MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"))
 
 
 @asynccontextmanager
@@ -73,7 +48,6 @@ async def lifespan(app):
 
 
 @app.get("/search")
-<<<<<<< HEAD
 def vector_search(
     q: str = Query(...),
     court: str = Query(None),
@@ -83,15 +57,6 @@ def vector_search(
     decision_date: str = Query(None),
     db: Session = Depends(get_database),
 ) -> list[SearchResult]:
-=======
-def vector_search(q: str = Query(...),
-                  court: str = Query(None),
-                  year: str = Query(None),
-                  judge: str = Query(None),
-                  is_gst: str = Query(None),
-                  decision_date: str = Query(None),
-                  db: Session = Depends(get_database)) -> List[SearchResult]:
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
     query_vector = embed_model.encode(q).tolist()
 
     # Base statement joining DocumentChunk and Document
@@ -107,13 +72,8 @@ def vector_search(q: str = Query(...),
     if judge:
         stmt = stmt.where(Document.judge.ilike(f"%{judge}%"))
 
-<<<<<<< HEAD
     if is_gst is not None and is_gst.lower() in ("true", "false", "yes", "no"):
         is_gst_value = is_gst.lower() in ("true", "yes")
-=======
-    if is_gst is not None and is_gst.lower() in ('true', 'false', 'yes', 'no'):
-        is_gst_value = is_gst.lower() in ('true', 'yes')
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
         stmt = stmt.where(Document.is_gst_core == is_gst_value)
 
     if decision_date:
@@ -175,8 +135,6 @@ def get_document_summary(id: int, db: Session = Depends(get_database)):
         summary += "..."
 
     return {"summary": summary}
-<<<<<<< HEAD
-=======
 
 
 # ==================== Authentication Endpoints ====================
@@ -248,4 +206,3 @@ async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_data
 def get_current_user_info(current_user: User = Depends(get_current_user_required)):
     """Get current authenticated user info."""
     return current_user
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898

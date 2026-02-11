@@ -207,10 +207,10 @@ class ONNXEmbedder:
             self._use_onnx = True
 
         except ImportError:
-            # Fall back to regular SentenceTransformer
-            from sentence_transformers import SentenceTransformer
+            # Fall back to regular transformers-based embedder
+            from app.embeddings import EmbeddingModel  # type: ignore[no-redef]
 
-            self.model = SentenceTransformer(self.model_name)
+            self.model = EmbeddingModel(self.model_name)
             self._initialized = True
             self._use_onnx = False
 
@@ -294,7 +294,7 @@ def two_stage_filter(
     nlp: Any,
     text_getter: Callable[[DocT], str] | None = None,
     max_chars: int = 6000,
-    ner_max_chars: int = 2000,
+    ner_max_chars: int = 3500,
     ner_batch_size: int = 16,
 ) -> tuple[list[DocT], dict[str, Any]]:
     """

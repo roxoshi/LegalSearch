@@ -44,11 +44,19 @@ docker compose version   # needs v2.20+
 
 ### Staging only (for building the database)
 
-- NVIDIA GPU with CUDA 12.1+ drivers (for ML filtering; falls back to CPU if unavailable)
+- NVIDIA GPU with CUDA 12.1+ drivers (the pipeline runs directly on the host to access the GPU)
+- Python 3.10+ with [uv](https://docs.astral.sh/uv/) installed
 - 16GB+ RAM recommended (the pipeline processes hundreds of thousands of PDFs)
 - Raw data in `.data/` directory:
   - `.data/metadata/raw/` — Parquet files (SC-GST-*.parquet, HC-GST-*/)
   - `.data/GST_judgments/` — Zip/tar archives of PDF judgments
+
+Verify the GPU is accessible from the host:
+
+```bash
+nvidia-smi
+python -c "import torch; print(torch.cuda.is_available())"  # should print True
+```
 
 ### Dev/Prod VPS
 
@@ -134,6 +142,16 @@ openssl rand -hex 32
 | `MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model |
 | `STAGING_HOST` | — | Staging server IP (for sync from dev/prod) |
 | `STAGING_SSH_USER` | — | SSH user on staging (for sync) |
+
+### Running docker compose directly
+
+The `deploy.sh` script automatically loads your env file. If you run `docker compose` commands directly, you **must** pass `--env-file` so compose can substitute `${VARIABLE}` references:
+
+```bash
+docker compose --env-file envs/.env.staging -f docker-compose.yml -f docker-compose.staging.yml up -d
+```
+
+Without `--env-file`, you'll get errors like `required variable POSTGRES_USER is missing a value`.
 
 ---
 
@@ -274,7 +292,8 @@ Then confirm the database port is only accessible locally:
 # nc -zv <server-public-ip> 5432
 
 # This should work from the server itself:
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db pg_isready -U legalsearch -d search_db
+docker compose --env-file envs/.env.prod -f docker-compose.yml -f docker-compose.prod.yml \
+  exec -T db pg_isready -U legalsearch -d search_db
 ```
 
 ### Step 4: Populate the database
@@ -299,7 +318,24 @@ You can adjust these limits in `docker-compose.prod.yml` based on your VPS specs
 
 ## Building the Database on Staging
 
-Staging is where the raw PDF data is processed through the ML pipeline to build the search database. This is the only environment that runs the pipeline services.
+Staging is where the raw PDF data is processed through the ML pipeline to build the search database. The pipeline runs **directly on the host machine** (not in Docker) so it can access the local GPU for NER filtering and vector embedding. Only the database runs in Docker.
+
+```
+┌─────────────────────────────────────────────────┐
+│  Staging Machine (GPU)                          │
+│                                                 │
+│  Host (has GPU):                                │
+│    uv run python -m pipelines.unified_pipeline  │
+│      ├── NER Filter (spaCy, GPU-accelerated)    │
+│      ├── Embedding (sentence-transformers, GPU) │
+│      └── connects to ↓                          │
+│                                                 │
+│  Docker:                                        │
+│    └── db (PostgreSQL + pgvector, port 5432)    │
+│    └── backend (FastAPI, port 8000)             │
+│    └── frontend (Next.js, port 3000)            │
+└─────────────────────────────────────────────────┘
+```
 
 ### Step 1: Configure staging
 
@@ -308,19 +344,23 @@ cp envs/.env.staging.example envs/.env.staging
 # Edit with your values
 ```
 
-### Step 2: Build base images (one-time)
+### Step 2: Install Python dependencies on the host
 
-The pipeline uses large Docker images with pre-installed ML models (spaCy NER, sentence-transformers). Build them once:
+The pipeline runs on the host (not in Docker), so you need the Python dependencies locally:
 
 ```bash
-./scripts/build-base-images.sh
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install project dependencies (--all-extras includes spacy-transformers, torch, cupy for GPU)
+uv sync --all-extras
+
+# Download the legal NER model from HuggingFace
+uv run python scripts/install_spacy_model.py
+
+# Verify GPU is available to PyTorch
+uv run python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
-
-This creates:
-- `legalsearch-base-backend` — FastAPI + SQLAlchemy + sentence-transformers
-- `legalsearch-base-unified` — All of the above + spaCy + legal NER model + ONNX Runtime
-
-These images are cached locally and make subsequent builds fast.
 
 ### Step 3: Place raw data
 
@@ -346,33 +386,60 @@ Ensure your raw data is in the expected locations:
           data.tar
 ```
 
-### Step 4: Start the database and run the pipeline
+### Step 4: Start the database
+
+Start only the database in Docker. The pipeline will connect to it via `localhost:5432`:
 
 ```bash
-# Start the core services first
 ./scripts/deploy.sh staging start
-
-# Run the unified pipeline (recommended)
-# This uses docker-compose.staging.yml which has the pipeline services
-docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-  --profile ingest-fast up unified
-
-# Or run HC only:
-docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-  --profile ingest-hc up unified-hc
 ```
 
+### Step 5: Run the pipeline on the host (GPU-accelerated)
+
+Run the pipeline directly on the host machine so it can use the GPU. The pipeline auto-reads `envs/.env.staging` to connect to the database — no need to manually export `DATABASE_URL`:
+
+```bash
+# Run the unified pipeline — all courts (recommended)
+uv run python -m pipelines.unified_pipeline \
+  --metadata-dir .data/metadata/raw \
+  --judgments-dir .data/GST_judgments \
+  --court-type all
+
+# Or run specific courts:
+# Supreme Court only
+uv run python -m pipelines.unified_pipeline \
+  --metadata-dir .data/metadata/raw \
+  --judgments-dir .data/GST_judgments \
+  --court-type sc
+
+# High Court only
+uv run python -m pipelines.unified_pipeline \
+  --metadata-dir .data/metadata/raw \
+  --judgments-dir .data/GST_judgments \
+  --court-type hc
+
+# High Court, specific years, with limit
+uv run python -m pipelines.unified_pipeline \
+  --metadata-dir .data/metadata/raw \
+  --judgments-dir .data/GST_judgments \
+  --court-type hc --years 2018 2019 --limit 50
+```
+
+> **Note:** The pipeline reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `DB_PORT` from `envs/.env.staging` automatically. You can override by setting `DATABASE_URL` directly or sourcing the env file first (`set -a; source envs/.env.staging; set +a`).
+
 The pipeline processes data in 6 steps:
-1. **Extract** — Read PDFs from zip/tar archives
-2. **NER Filter** — Use spaCy legal NER to identify GST-relevant cases
-3. **Keyword Filter** — Fallback keyword matching for edge cases
-4. **HTML Convert** — Convert PDFs to HTML for display
-5. **Embed** — Generate 384-dim vector embeddings using sentence-transformers
-6. **Ingest** — Bulk insert documents and chunks into PostgreSQL
+1. **Extract** — Read PDFs from zip/tar archives (CPU)
+2. **NER Filter** — Use spaCy legal NER to identify GST-relevant cases (GPU)
+3. **Keyword Filter** — Fallback keyword matching for edge cases (CPU)
+4. **HTML Convert** — Convert PDFs to HTML for display (CPU)
+5. **Embed** — Generate 384-dim vector embeddings using sentence-transformers (GPU)
+6. **Ingest** — Bulk insert documents and chunks into PostgreSQL (CPU)
+
+Steps 2 and 5 run on GPU because the pipeline executes on the host where the GPU is directly accessible. This is significantly faster than running in Docker without GPU passthrough.
 
 For a full SC+HC dataset, this typically takes several hours depending on your hardware.
 
-### Step 5: Verify the database
+### Step 6: Verify the database
 
 ```bash
 ./scripts/deploy.sh staging status
@@ -601,8 +668,8 @@ Ports 3000, 5432, and 8000 should NOT be exposed to the internet. They're only a
 ./scripts/deploy.sh prod logs
 
 # Specific service
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f db
+docker compose --env-file envs/.env.prod -f docker-compose.yml -f docker-compose.prod.yml logs -f backend
+docker compose --env-file envs/.env.prod -f docker-compose.yml -f docker-compose.prod.yml logs -f db
 ```
 
 ### Updating the application
@@ -620,7 +687,7 @@ For a quicker update that uses Docker layer caching:
 ```bash
 git pull origin main
 ./scripts/deploy.sh prod stop
-docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+docker compose --env-file envs/.env.prod -f docker-compose.yml -f docker-compose.prod.yml build
 ./scripts/deploy.sh prod start
 ```
 
@@ -645,8 +712,8 @@ The dump script automatically keeps only the last 5 dumps.
 ./scripts/deploy.sh prod status
 
 # Connect to the database directly
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec db \
-  psql -U legalsearch -d search_db
+docker compose --env-file envs/.env.prod -f docker-compose.yml -f docker-compose.prod.yml \
+  exec db psql -U legalsearch -d search_db
 
 # Inside psql:
 \dt                                    -- list tables
@@ -673,17 +740,16 @@ The backend memory matters most because it loads the sentence-transformers model
 
 ### "Set POSTGRES_USER in your env file" error on `docker compose up`
 
-You're running docker compose without loading the env file. Use the deploy script:
+You're running `docker compose` without loading the env file. Use the deploy script:
 
 ```bash
 ./scripts/deploy.sh dev start
 ```
 
-Or load the env file manually:
+Or pass `--env-file` when running compose directly:
 
 ```bash
-set -a; source envs/.env.dev; set +a
-docker compose up -d
+docker compose --env-file envs/.env.dev up -d
 ```
 
 ### Backend can't connect to database
@@ -691,8 +757,8 @@ docker compose up -d
 Check that the database is healthy:
 
 ```bash
-docker compose ps
-docker compose logs db
+docker compose --env-file envs/.env.dev ps
+docker compose --env-file envs/.env.dev logs db
 ```
 
 The backend uses `depends_on: db: condition: service_healthy`, so it won't start until the db healthcheck passes. If the healthcheck is failing, check that `POSTGRES_USER` and `POSTGRES_DB` match between your env file and what's actually in the database volume.
@@ -701,11 +767,12 @@ If you changed credentials after the database was first created, the PostgreSQL 
 
 ```bash
 # Option 1: Reset the volume (loses data!)
-docker compose down -v
+docker compose --env-file envs/.env.dev down -v
 ./scripts/deploy.sh dev start
 
 # Option 2: Change the password inside the database
-docker compose exec db psql -U old_username -d search_db -c "ALTER USER old_username WITH PASSWORD 'new_password';"
+docker compose --env-file envs/.env.dev exec db \
+  psql -U old_username -d search_db -c "ALTER USER old_username WITH PASSWORD 'new_password';"
 ```
 
 ### Frontend shows empty search results
@@ -727,13 +794,16 @@ The HC dataset is large (1M+ records). The pipeline writes PDFs to a staging dir
 - Run SC and HC separately:
   ```bash
   # SC first
-  docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-    --profile ingest-fast run --rm unified \
-    python -m pipelines.unified_pipeline --court-type sc --metadata-dir /app/.data/metadata/raw --judgments-dir /app/.data/GST_judgments
+  uv run python -m pipelines.unified_pipeline \
+    --metadata-dir .data/metadata/raw \
+    --judgments-dir .data/GST_judgments \
+    --court-type sc
 
   # Then HC
-  docker compose -f docker-compose.yml -f docker-compose.staging.yml \
-    --profile ingest-hc up unified-hc
+  uv run python -m pipelines.unified_pipeline \
+    --metadata-dir .data/metadata/raw \
+    --judgments-dir .data/GST_judgments \
+    --court-type hc
   ```
 
 ### `pg_restore` errors during sync

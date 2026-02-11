@@ -1,11 +1,7 @@
 'use client';
 
-<<<<<<< HEAD
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { getApiUrl } from '@/lib/api';
-=======
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
 
 interface User {
   id: number;
@@ -31,27 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-<<<<<<< HEAD
   const fetchUser = useCallback(async (authToken: string) => {
     try {
       const apiUrl = getApiUrl();
-=======
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-  // Load token from localStorage on mount
-  useEffect(() => {
-    const storedToken = localStorage.getItem('auth_token');
-    if (storedToken) {
-      setToken(storedToken);
-      fetchUser(storedToken);
-    } else {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const fetchUser = async (authToken: string) => {
-    try {
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
       const res = await fetch(`${apiUrl}/auth/me`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
@@ -68,7 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-<<<<<<< HEAD
   }, []);
 
   // Load token from localStorage on mount
@@ -84,11 +61,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const apiUrl = getApiUrl();
-=======
-  };
-
-  const login = async (email: string, password: string) => {
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
     const formData = new URLSearchParams();
     formData.append('username', email);
     formData.append('password', password);
@@ -111,10 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signup = async (email: string, password: string, name?: string) => {
-<<<<<<< HEAD
     const apiUrl = getApiUrl();
-=======
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
     const res = await fetch(`${apiUrl}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -131,10 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const loginWithGoogle = async (googleAccessToken: string) => {
-<<<<<<< HEAD
     const apiUrl = getApiUrl();
-=======
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
     const res = await fetch(`${apiUrl}/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

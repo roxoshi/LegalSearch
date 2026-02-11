@@ -25,7 +25,8 @@ RUN uv pip install --system \
     sqlalchemy \
     psycopg2-binary \
     pgvector \
-    sentence-transformers \
+    transformers \
+    torch \
     pydantic-settings \
     python-dotenv \
     passlib[bcrypt] \
@@ -35,4 +36,4 @@ RUN uv pip install --system \
     email-validator
 
 # Pre-download the embedding model (biggest time saver!)
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+RUN python -c "from transformers import AutoTokenizer, AutoModel; AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2'); AutoModel.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')"

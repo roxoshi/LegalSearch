@@ -34,6 +34,10 @@ import glob as _glob
 for _lib in _glob.glob(
     os.path.join(sys.prefix, "lib", "python*", "site-packages", "nvidia", "*", "lib", "*.so.*")
 ):
+    # Skip libnvblas — it intercepts BLAS calls and crashes without a config file.
+    # PyTorch and spaCy use cuBLAS directly and don't need the NVBLAS shim.
+    if "libnvblas" in _lib:
+        continue
     try:
         _ctypes.CDLL(_lib, mode=_ctypes.RTLD_GLOBAL)
     except OSError:
@@ -69,7 +73,7 @@ logging.basicConfig(
 logger = logging.getLogger("unified_pipeline")
 
 # Reduce noise from other loggers
-logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+logging.getLogger("app.embeddings").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.WARNING)
 logging.getLogger("safetensors").setLevel(logging.WARNING)
 
@@ -502,7 +506,7 @@ def batch_chunk_and_embed(docs: list[DocumentData], model, splitter) -> list[Doc
     for i in tqdm(range(0, total_chunks, EMBEDDING_BATCH_SIZE), desc="Embeddings", unit="batch"):
         batch = all_chunks[i : i + EMBEDDING_BATCH_SIZE]
         batch_embeddings = model.encode(batch, show_progress_bar=False, batch_size=128)
-        # Handle both numpy arrays (SentenceTransformer) and lists (ONNXEmbedder)
+        # Handle both numpy arrays (EmbeddingModel) and lists (ONNXEmbedder)
         if hasattr(batch_embeddings, "tolist"):
             all_embeddings.extend(batch_embeddings.tolist())
         else:
@@ -641,6 +645,61 @@ def load_sc_metadata(metadata_dir: str) -> list[dict]:
 load_metadata = load_sc_metadata
 
 
+def _load_env_file() -> dict[str, str]:
+    """Load key=value pairs from the staging env file (no dependencies needed)."""
+    project_root = Path(__file__).resolve().parent.parent
+    env = os.getenv("ENVIRONMENT", "staging")
+    env_path = project_root / "envs" / f".env.{env}"
+    if not env_path.exists():
+        env_path = project_root / "envs" / ".env.staging"
+    if not env_path.exists():
+        return {}
+
+    vals: dict[str, str] = {}
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        # Strip surrounding quotes
+        value = value.strip().strip("'\"")
+        # Skip placeholders
+        if value.startswith("<") or value.startswith("${"):
+            continue
+        vals[key.strip()] = value
+    return vals
+
+
+def _build_db_url_from_env() -> str:
+    """Construct DATABASE_URL from POSTGRES_* env vars, falling back to the env file."""
+    from urllib.parse import quote_plus
+
+    env_file = _load_env_file()
+
+    def _get(key: str, default: str = "") -> str:
+        return os.getenv(key) or env_file.get(key, default)
+
+    user = _get("POSTGRES_USER")
+    password = _get("POSTGRES_PASSWORD")
+    db = _get("POSTGRES_DB", "search_db")
+    port = _get("DB_PORT", "5432")
+
+    if not user or not password:
+        raise RuntimeError(
+            "Cannot build DATABASE_URL: POSTGRES_USER and POSTGRES_PASSWORD are required.\n"
+            "Either:\n"
+            "  1. Set DATABASE_URL directly, or\n"
+            "  2. Source your env file: set -a; source envs/.env.staging; set +a\n"
+            "  3. Ensure envs/.env.staging exists with POSTGRES_USER and POSTGRES_PASSWORD set"
+        )
+
+    url = f"postgresql://{quote_plus(user)}:{quote_plus(password)}@localhost:{port}/{db}"
+    logger.info(f"Constructed DATABASE_URL from env vars (db={db}, port={port})")
+    return url
+
+
 def run_pipeline(
     metadata_dir: str,
     judgments_dir: str,
@@ -675,7 +734,7 @@ def run_pipeline(
         from app.chunk_generator import RecursiveCharacterTextSplitter  # type: ignore[no-redef]
 
     if db_url is None:
-        db_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/search_db")
+        db_url = os.getenv("DATABASE_URL") or _build_db_url_from_env()
 
     # === IMPORT MODE: Skip Steps 1-3, load from exported data ===
     if import_filtered_dir:
@@ -775,10 +834,10 @@ def run_pipeline(
         logger.info(f"Using ONNX Runtime for embeddings (model: {model_name})")
         embed_model = ONNXEmbedder(model_name)
     else:
-        from sentence_transformers import SentenceTransformer
+        from app.embeddings import EmbeddingModel  # type: ignore[no-redef]
 
         logger.info(f"Loading embedding model: {model_name}")
-        embed_model = SentenceTransformer(model_name)
+        embed_model = EmbeddingModel(model_name)
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=4000, chunk_overlap=600, separators=["\n\n", "\n", ".", " ", ""]

@@ -9,7 +9,7 @@ from etl.transform import Transformer
 @pytest.fixture
 def transformer():
     """Create a Transformer instance with mocked model"""
-    with patch("etl.transform.SentenceTransformer") as mock_st:
+    with patch("etl.transform.EmbeddingModel") as mock_st:
         mock_model = Mock()
         mock_model.encode.return_value = [[0.1] * 384]  # Mock embedding
         mock_st.return_value = mock_model
@@ -20,7 +20,7 @@ def transformer():
 
 def test_transformer_initialization():
     """Test that Transformer initializes correctly"""
-    with patch("etl.transform.SentenceTransformer") as mock_st:
+    with patch("etl.transform.EmbeddingModel") as mock_st:
         transformer = Transformer(model_name="test-model")
 
         assert transformer is not None

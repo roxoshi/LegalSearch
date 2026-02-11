@@ -15,11 +15,7 @@
   "type": "module",
   "dependencies": {
     "@heroicons/react": "^2.2.0",
-<<<<<<< HEAD
-    "@react-oauth/google": "^0.12.1",
-=======
     "@react-oauth/google": "^0.13.4",
->>>>>>> f784922c5b9f718b8c700cd74f35f0b3c9c52898
     "@tailwindcss/postcss": "^4.1.18",
     "autoprefixer": "^10.4.23",
     "next": "^16.1.1",

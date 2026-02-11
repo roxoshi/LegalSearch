@@ -1,5 +1,8 @@
-# Staging override: Pipeline services for building the database
-# Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml --profile ingest up
+# Staging override: Pipeline services (CPU-only, for use when NVIDIA Container Toolkit is available)
+# For GPU-accelerated ingestion, run the pipeline directly on the host instead:
+#   uv run python -m pipelines.unified_pipeline --court-type all
+# The pipeline auto-reads envs/.env.staging for database credentials.
+# See docs/DEPLOYMENT.md for full instructions.
 
 services:
   # SC Shard Service: Extract raw SC zips + parquet into individual JSON + PDF files
@@ -20,7 +23,7 @@ services:
       --output-dir /app/.data/metadata/processed
       --pdf-output-dir /app/.data/gst_pdfs
 
-  # Filter Service: ML-based filtering of sharded judgments (GPU optional)
+  # Filter Service: ML-based filtering of sharded judgments (CPU-only in Docker)
   filter:
     build:
       context: .
@@ -35,14 +38,6 @@ services:
       python -m pipelines.filter_judgments
       --processed-dir /app/.data/metadata/processed
       --pdf-dir /app/.data/gst_pdfs
-    # Uncomment below to enable GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
     depends_on:
       shard:
         condition: service_completed_successfully
@@ -70,7 +65,7 @@ services:
       db:
         condition: service_healthy
 
-  # Unified Pipeline: Optimized single-step ingestion (RECOMMENDED)
+  # Unified Pipeline (CPU-only in Docker, use host execution for GPU)
   unified:
     build:
       context: .

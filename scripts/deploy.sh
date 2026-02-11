@@ -9,17 +9,19 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 usage() {
-    echo "Usage: $0 <environment> <command>"
+    echo "Usage: $0 <environment> <command> [args...]"
     echo ""
     echo "Environments: staging, dev, prod"
-    echo "Commands:     start, stop, rebuild, logs, status"
+    echo "Commands:     start, stop, rebuild, logs, status, ingest"
     echo ""
     echo "Examples:"
-    echo "  $0 staging start        # Start staging (db + backend + frontend)"
-    echo "  $0 staging rebuild      # Rebuild and restart all services"
-    echo "  $0 prod start           # Start production with hardening"
-    echo "  $0 dev logs             # Tail logs for dev"
-    echo "  $0 staging status       # Show service status and document count"
+    echo "  $0 staging start                       # Start staging (db + backend + frontend)"
+    echo "  $0 staging rebuild                     # Rebuild and restart all services"
+    echo "  $0 staging ingest                      # Run unified pipeline (default: ingest-fast / unified)"
+    echo "  $0 staging ingest ingest-hc unified-hc # Run HC-only pipeline"
+    echo "  $0 prod start                          # Start production with hardening"
+    echo "  $0 dev logs                            # Tail logs for dev"
+    echo "  $0 staging status                      # Show service status and document count"
     exit 1
 }
 
@@ -45,7 +47,7 @@ fi
 set -a; source "$ENV_FILE"; set +a
 
 # Build compose command with correct override files
-COMPOSE_CMD="docker compose -f docker-compose.yml"
+COMPOSE_CMD="docker compose --env-file $ENV_FILE -f docker-compose.yml"
 
 case "$ENVIRONMENT" in
     staging)
@@ -114,6 +116,21 @@ case "$COMMAND" in
 
     logs)
         $COMPOSE_CMD logs -f
+        ;;
+
+    ingest)
+        if [ "$ENVIRONMENT" != "staging" ]; then
+            echo -e "${RED}Error: 'ingest' is only available in the staging environment.${NC}"
+            echo "Dev/prod environments receive data via db-sync, not ingestion."
+            exit 1
+        fi
+        PROFILE="${3:-ingest-fast}"
+        SERVICE="${4:-unified}"
+        shift 2 2>/dev/null || true
+        # Pass remaining args after environment, command, profile, service
+        EXTRA_ARGS="${@:3}"
+        echo -e "${GREEN}Running pipeline ($PROFILE / $SERVICE)...${NC}"
+        $COMPOSE_CMD --profile "$PROFILE" up "$SERVICE" $EXTRA_ARGS
         ;;
 
     status)

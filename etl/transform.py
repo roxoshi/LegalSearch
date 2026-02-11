@@ -14,7 +14,7 @@ try:
 except ImportError:
     from app.chunk_generator import RecursiveCharacterTextSplitter  # type: ignore[no-redef]
     from app.models import Document, DocumentChunk  # type: ignore[no-redef]
-from sentence_transformers import SentenceTransformer
+from app.embeddings import EmbeddingModel
 
 from etl.schemas import DocumentJSON
 
@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 class Transformer:
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
+        self.model = EmbeddingModel(model_name)
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=4000, chunk_overlap=600, separators=["\n\n", "\n", ".", " ", ""]
         )

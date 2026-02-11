@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+from app.embeddings import EmbeddingModel
 from sqlalchemy.orm import Session
 
 from app.chunk_generator import RecursiveCharacterTextSplitter
@@ -43,9 +43,9 @@ def init_database() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def load_model() -> SentenceTransformer:
+def load_model() -> EmbeddingModel:
     logger.info("Loading embedding model: %s", MODEL_NAME)
-    return SentenceTransformer(MODEL_NAME)
+    return EmbeddingModel(MODEL_NAME)
 
 
 # Data loading
@@ -69,7 +69,7 @@ def chunked(iterable: list[dict], size: int) -> Generator[list[dict], Any, None]
 
 def ingest_batch(
     db: Session,
-    model: SentenceTransformer,
+    model: EmbeddingModel,
     batch: list[dict],
 ) -> None:
     text_splitter = RecursiveCharacterTextSplitter(
