@@ -94,7 +94,7 @@ KEEP_COLUMNS = [
     "path",
 ]
 
-GST_STATUTES_KEYWORDS = ["goods and services", "goods & services", "gst"]
+GST_STATUTES_KEYWORDS = ["goods and services", "goods & services"]
 MAX_TEXT_CHARS = 6000
 EMBEDDING_BATCH_SIZE = 1024  # Increased for speed
 NUM_WORKERS = max(4, cpu_count())
@@ -214,6 +214,34 @@ def batch_ner_filter(docs: list[DocumentData], nlp) -> list[DocumentData]:
     logger.info(f"Final: {len(filtered)}/{len(docs)} documents selected")
 
     return filtered
+
+
+def persist_filtered_pdfs(docs: list[DocumentData], output_dir: str) -> int:
+    """Copy passing PDFs to a persistent directory for future use.
+
+    Args:
+        docs: Filtered DocumentData list (after NER Step 3)
+        output_dir: Target directory (e.g. `.data/gst_pdfs`)
+
+    Returns:
+        Number of PDFs persisted
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    count = 0
+
+    for doc in docs:
+        safe_id = _sanitize_filename(doc.case_id)
+        dest = os.path.join(output_dir, f"{safe_id}.pdf")
+
+        if doc.pdf_staging_path and Path(doc.pdf_staging_path).exists():
+            shutil.copy2(doc.pdf_staging_path, dest)
+            count += 1
+        elif doc.pdf_bytes:
+            Path(dest).write_bytes(doc.pdf_bytes)
+            count += 1
+
+    logger.info(f"Persisted {count} filtered PDFs to {output_dir}")
+    return count
 
 
 def _sanitize_filename(case_id: str) -> str:
@@ -745,6 +773,7 @@ def run_pipeline(
         if not docs:
             logger.error("No documents found in import directory!")
             return 0
+        persist_filtered_pdfs(docs, ".data/gst_pdfs")
     else:
         # === STEP 1: Load metadata ===
         logger.info("=" * 50)
@@ -790,8 +819,16 @@ def run_pipeline(
             logger.info("STEP 3: NER Filtering (two-stage)")
             logger.info("=" * 50)
             nlp = load_ner_model()
+            all_docs = docs
             docs = batch_ner_filter(docs, nlp)
             del nlp  # Free memory
+
+            # Persist passing and rejected PDFs to separate directories
+            persist_filtered_pdfs(docs, ".data/gst_pdfs")
+            filtered_ids = {d.case_id for d in docs}
+            rejected_docs = [d for d in all_docs if d.case_id not in filtered_ids]
+            persist_filtered_pdfs(rejected_docs, ".data/rejected_pdfs")
+            del all_docs, rejected_docs
 
             if not docs:
                 logger.error("No GST-relevant documents found!")
@@ -800,6 +837,9 @@ def run_pipeline(
             logger.info("STEP 3: Skipping NER filter")
             for doc in docs:
                 doc.is_gst_core = True
+
+            # All docs pass when filter is skipped
+            persist_filtered_pdfs(docs, ".data/gst_pdfs")
 
         # === EXPORT MODE: Save filtered docs and stop ===
         if export_after_filter_dir:

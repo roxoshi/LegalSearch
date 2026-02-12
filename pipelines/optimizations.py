@@ -22,29 +22,8 @@ if TYPE_CHECKING:
 # These are checked BEFORE expensive NER inference
 GST_KEYWORDS: frozenset[str] = frozenset(
     [
-        "gst",
-        "cgst",
-        "sgst",
-        "igst",
-        "utgst",
-        "goods and services tax",
-        "goods & services tax",
-        "central goods and services",
-        "state goods and services",
-        "integrated goods and services",
-        "union territory goods and services",
-        "gst act",
-        "cgst act",
-        "sgst act",
-        "igst act",
-        "gst council",
-        "input tax credit",
-        "itc",
-        "reverse charge",
-        "composition scheme",
-        "e-way bill",
-        "hsn code",
-        "sac code",
+        "goods and services",
+        "goods & services"
     ]
 )
 

@@ -3,6 +3,7 @@ set -e
 
 # Create a pg_dump of the LegalSearch database
 # Saves to .data/db-dumps/ with timestamp, keeps last 5 dumps
+# Usage: ./scripts/db-dump.sh [environment]  (defaults to staging)
 
 cd "$(dirname "$0")/.."
 
@@ -11,14 +12,19 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+ENVIRONMENT="${1:-staging}"
+
 # Source environment file
-ENV_FILE="${ENV_FILE:-envs/.env.staging}"
+ENV_FILE="${ENV_FILE:-envs/.env.${ENVIRONMENT}}"
 if [ -f "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE"; set +a
 else
     echo -e "${RED}Error: $ENV_FILE not found.${NC}"
     exit 1
 fi
+
+# Use same project name as deploy.sh so we target the right containers
+export COMPOSE_PROJECT_NAME="legalsearch-${ENVIRONMENT}"
 
 DUMP_DIR="${SYNC_DUMP_DIR:-.data/db-dumps}"
 mkdir -p "$DUMP_DIR"
@@ -30,7 +36,8 @@ echo -e "${GREEN}Creating database dump...${NC}"
 
 # Check if db is running
 if ! docker compose exec -T db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB:-search_db}" > /dev/null 2>&1; then
-    echo -e "${RED}Error: Database is not running.${NC}"
+    echo -e "${RED}Error: Database is not running. Start it first:${NC}"
+    echo "  ./scripts/deploy.sh ${ENVIRONMENT} start"
     exit 1
 fi
 

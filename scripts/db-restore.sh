@@ -2,7 +2,7 @@
 set -e
 
 # Restore a pg_dump into the LegalSearch database
-# Usage: ./scripts/db-restore.sh <dump-file>
+# Usage: ./scripts/db-restore.sh [environment] <dump-file>
 
 cd "$(dirname "$0")/.."
 
@@ -12,12 +12,20 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <dump-file>"
-    echo "Example: $0 .data/db-dumps/legalsearch_20240101_120000.dump"
+    echo "Usage: $0 [environment] <dump-file>"
+    echo "Example: $0 dev .data/db-dumps/legalsearch_20240101_120000.dump"
+    echo "         $0 .data/db-dumps/legalsearch_20240101_120000.dump  (defaults to dev)"
     exit 1
 fi
 
-DUMP_FILE="$1"
+# Parse args: if two args, first is environment; if one, default to dev
+if [ $# -ge 2 ]; then
+    ENVIRONMENT="$1"
+    DUMP_FILE="$2"
+else
+    ENVIRONMENT="dev"
+    DUMP_FILE="$1"
+fi
 
 if [ ! -f "$DUMP_FILE" ]; then
     echo -e "${RED}Error: Dump file not found: $DUMP_FILE${NC}"
@@ -25,17 +33,20 @@ if [ ! -f "$DUMP_FILE" ]; then
 fi
 
 # Source environment file
-ENV_FILE="${ENV_FILE:-envs/.env.dev}"
+ENV_FILE="${ENV_FILE:-envs/.env.${ENVIRONMENT}}"
 if [ -f "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE"; set +a
 else
     echo -e "${YELLOW}Warning: $ENV_FILE not found. Using defaults.${NC}"
 fi
 
+# Use same project name as deploy.sh so we target the right containers
+export COMPOSE_PROJECT_NAME="legalsearch-${ENVIRONMENT}"
+
 # Check if db is running
 if ! docker compose exec -T db pg_isready -U "${POSTGRES_USER:-user}" -d "${POSTGRES_DB:-search_db}" > /dev/null 2>&1; then
     echo -e "${RED}Error: Database is not running. Start it first:${NC}"
-    echo "  docker compose up -d db"
+    echo "  ./scripts/deploy.sh ${ENVIRONMENT} start"
     exit 1
 fi
 
