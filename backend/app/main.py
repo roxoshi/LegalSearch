@@ -34,6 +34,8 @@ from .models import Document, DocumentChunk, OTPCode, User, UserIdentity
 
 app = FastAPI()
 
+environment = os.getenv("ENVIRONMENT", "development")
+
 allowed_origins = [
     "http://localhost:3000",
 ]
@@ -41,13 +43,19 @@ frontend_url = os.getenv("FRONTEND_URL", "")
 if frontend_url:
     allowed_origins.append(frontend_url)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# In dev/development: allow any HTTP origin so LAN IPs work (mirrors api.ts dynamic hostname logic).
+# In staging/prod: restrict to explicit allowed_origins only.
+_cors_kwargs: dict = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if environment in ("development", "dev"):
+    _cors_kwargs["allow_origin_regex"] = r"http://.*"
+else:
+    _cors_kwargs["allow_origins"] = allowed_origins
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 embed_model = EmbeddingModel(
     os.getenv("MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")

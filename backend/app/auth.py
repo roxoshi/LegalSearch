@@ -107,7 +107,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         key=AUTH_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=os.getenv("ENVIRONMENT", "development") != "development",
+        secure=os.getenv("ENVIRONMENT", "development") not in ("development", "dev"),
         samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
