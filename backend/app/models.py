@@ -1,8 +1,19 @@
-from datetime import datetime
+from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -11,14 +22,47 @@ from .database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(Text, unique=True, nullable=False, index=True)
-    hashed_password = Column(Text, nullable=True)  # Null for OAuth-only users
-    name = Column(Text, nullable=True)
-    oauth_provider = Column(Text, nullable=True)  # 'google' or None for email/password
-    oauth_id = Column(Text, nullable=True)  # Google user ID
-    created_at = Column(DateTime, default=datetime.utcnow)
-    is_active = Column(Boolean, default=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    first_name = Column(String(50), nullable=False)
+    last_name = Column(String(50), nullable=False)
+    year_of_birth = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    identities = relationship(
+        "UserIdentity", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("year_of_birth > 1900", name="ck_users_year_of_birth"),
+    )
+
+
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    provider = Column(String(20), nullable=False)  # 'email', 'phone', 'google'
+    provider_id = Column(String(255), nullable=False)
+    is_verified = Column(Boolean, default=False)
+
+    user = relationship("User", back_populates="identities")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_id", name="uq_identity_provider_id"),
+    )
+
+
+class OTPCode(Base):
+    __tablename__ = "otp_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    identifier = Column(String(255), index=True, nullable=False)
+    otp_hash = Column(String(255), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    attempts = Column(Integer, default=0)
 
 
 class Document(Base):
@@ -42,9 +86,14 @@ class Document(Base):
     extracted_statutes: Column = Column(ARRAY(Text), nullable=True)
 
     # Timestamps for sync support
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     chunks = relationship("DocumentChunk", back_populates="document")

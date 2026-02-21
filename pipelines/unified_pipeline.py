@@ -823,12 +823,8 @@ def run_pipeline(
             docs = batch_ner_filter(docs, nlp)
             del nlp  # Free memory
 
-            # Persist passing and rejected PDFs to separate directories
             persist_filtered_pdfs(docs, ".data/gst_pdfs")
-            filtered_ids = {d.case_id for d in docs}
-            rejected_docs = [d for d in all_docs if d.case_id not in filtered_ids]
-            persist_filtered_pdfs(rejected_docs, ".data/rejected_pdfs")
-            del all_docs, rejected_docs
+            del all_docs
 
             if not docs:
                 logger.error("No GST-relevant documents found!")

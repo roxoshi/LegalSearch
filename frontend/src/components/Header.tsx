@@ -21,10 +21,10 @@ export function Header() {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 text-sm text-slate-600">
                 <UserCircleIcon className="w-6 h-6" />
-                <span>{user.name || user.email}</span>
+                <span>{user.first_name || 'User'}</span>
               </div>
               <button
-                onClick={logout}
+                onClick={() => logout()}
                 className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
               >
                 Logout

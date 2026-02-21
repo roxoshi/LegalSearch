@@ -4,107 +4,105 @@ import { createContext, useContext, useState, useEffect, ReactNode, useCallback 
 import { getApiUrl } from '@/lib/api';
 
 interface User {
-  id: number;
-  email: string;
-  name: string | null;
-  oauth_provider: string | null;
+  id: string;
+  first_name: string;
+  last_name: string;
+  year_of_birth: number | null;
+}
+
+interface ProfileData {
+  first_name: string;
+  last_name: string;
+  year_of_birth?: number | null;
 }
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, name?: string) => Promise<void>;
-  loginWithGoogle: (googleAccessToken: string) => Promise<void>;
-  logout: () => void;
+  requestOtp: (identifier: string) => Promise<void>;
+  verifyOtp: (identifier: string, otp: string, profile?: ProfileData) => Promise<{ needs_profile: boolean }>;
+  loginWithGoogle: (credential: string) => Promise<{ needs_profile: boolean }>;
+  updateProfile: (profile: ProfileData) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchUser = useCallback(async (authToken: string) => {
+  const fetchUser = useCallback(async () => {
     try {
       const apiUrl = getApiUrl();
       const res = await fetch(`${apiUrl}/auth/me`, {
-        headers: { Authorization: `Bearer ${authToken}` }
+        credentials: 'include',
       });
       if (res.ok) {
         const userData = await res.json();
         setUser(userData);
       } else {
-        // Token invalid, clear it
-        localStorage.removeItem('auth_token');
-        setToken(null);
+        setUser(null);
       }
     } catch (err) {
       console.error('Failed to fetch user', err);
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Load token from localStorage on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem('auth_token');
-    if (storedToken) {
-      setToken(storedToken);
-      fetchUser(storedToken);
-    } else {
-      setIsLoading(false);
-    }
+    fetchUser();
   }, [fetchUser]);
 
-  const login = async (email: string, password: string) => {
+  const requestOtp = async (identifier: string) => {
     const apiUrl = getApiUrl();
-    const formData = new URLSearchParams();
-    formData.append('username', email);
-    formData.append('password', password);
-
-    const res = await fetch(`${apiUrl}/auth/login`, {
+    const res = await fetch(`${apiUrl}/auth/request-otp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier }),
+      credentials: 'include',
     });
 
     if (!res.ok) {
       const error = await res.json();
-      throw new Error(error.detail || 'Login failed');
+      throw new Error(error.detail || 'Failed to send OTP');
+    }
+  };
+
+  const verifyOtp = async (
+    identifier: string,
+    otp: string,
+    profile?: ProfileData
+  ): Promise<{ needs_profile: boolean }> => {
+    const apiUrl = getApiUrl();
+    const res = await fetch(`${apiUrl}/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, otp, ...profile }),
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.detail || 'OTP verification failed');
     }
 
     const data = await res.json();
-    localStorage.setItem('auth_token', data.access_token);
-    setToken(data.access_token);
-    await fetchUser(data.access_token);
-  };
-
-  const signup = async (email: string, password: string, name?: string) => {
-    const apiUrl = getApiUrl();
-    const res = await fetch(`${apiUrl}/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name })
-    });
-
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.detail || 'Signup failed');
+    if (!data.needs_profile) {
+      setUser(data.user);
     }
-
-    // Auto-login after signup
-    await login(email, password);
+    return { needs_profile: data.needs_profile };
   };
 
-  const loginWithGoogle = async (googleAccessToken: string) => {
+  const loginWithGoogle = async (credential: string): Promise<{ needs_profile: boolean }> => {
     const apiUrl = getApiUrl();
     const res = await fetch(`${apiUrl}/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: googleAccessToken })
+      body: JSON.stringify({ credential }),
+      credentials: 'include',
     });
 
     if (!res.ok) {
@@ -113,19 +111,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await res.json();
-    localStorage.setItem('auth_token', data.access_token);
-    setToken(data.access_token);
-    await fetchUser(data.access_token);
+    if (!data.needs_profile) {
+      setUser(data.user);
+    }
+    return { needs_profile: data.needs_profile };
   };
 
-  const logout = () => {
-    localStorage.removeItem('auth_token');
-    setToken(null);
+  const updateProfile = async (profile: ProfileData) => {
+    const apiUrl = getApiUrl();
+    const res = await fetch(`${apiUrl}/auth/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(profile),
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.detail || 'Profile update failed');
+    }
+
+    const userData = await res.json();
+    setUser(userData);
+  };
+
+  const logout = async () => {
+    try {
+      const apiUrl = getApiUrl();
+      await fetch(`${apiUrl}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err) {
+      console.error('Logout request failed', err);
+    }
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, signup, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, requestOtp, verifyOtp, loginWithGoogle, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

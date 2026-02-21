@@ -1,170 +1,243 @@
+import hashlib
 import os
-from datetime import datetime, timedelta
+import re
+import secrets
+import smtplib
+from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional
+from uuid import UUID, uuid4
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Request, Response, status
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import httpx
 
 from .database import get_database
-from .models import User
+from .models import OTPCode, User, UserIdentity
 
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+AUTH_COOKIE_NAME = "access_token"
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# SMTP configuration
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
 
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+OTP_EXPIRY_MINUTES = 5
+OTP_MAX_ATTEMPTS = 5
+
+_system_random = secrets.SystemRandom()
 
 
 # Pydantic models
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
-    name: Optional[str] = None
+class OTPRequest(BaseModel):
+    identifier: str
 
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
+class OTPVerify(BaseModel):
+    identifier: str
+    otp: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    year_of_birth: Optional[int] = None
 
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+class GoogleAuthRequest(BaseModel):
+    credential: str
 
 
-class TokenData(BaseModel):
-    email: Optional[str] = None
+class ProfileUpdate(BaseModel):
+    first_name: str
+    last_name: str
+    year_of_birth: Optional[int] = None
 
 
 class UserResponse(BaseModel):
-    id: int
-    email: str
-    name: Optional[str]
-    oauth_provider: Optional[str]
+    id: str
+    first_name: str
+    last_name: str
+    year_of_birth: Optional[int]
 
     model_config = {"from_attributes": True}
 
+    @classmethod
+    def from_user(cls, user: User) -> "UserResponse":
+        return cls(
+            id=str(user.id),
+            first_name=user.first_name,
+            last_name=user.last_name,
+            year_of_birth=user.year_of_birth,
+        )
 
-# Helper functions
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+
+# OTP helpers
+def generate_otp() -> str:
+    return str(_system_random.randint(100000, 999999))
 
 
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+def hash_otp(otp: str) -> str:
+    return hashlib.sha256(otp.encode()).hexdigest()
 
 
+def is_email(identifier: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", identifier))
+
+
+# JWT helpers
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-
-def get_user_by_email(db: Session, email: str) -> Optional[User]:
-    return db.query(User).filter(User.email == email).first()
-
-
-def create_user(db: Session, user: UserCreate) -> User:
-    hashed_password = get_password_hash(user.password)
-    db_user = User(
-        email=user.email,
-        hashed_password=hashed_password,
-        name=user.name
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    db.add(db_user)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=os.getenv("ENVIRONMENT", "development") != "development",
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+
+
+# User/identity helpers
+def get_or_create_identity(
+    db: Session, identifier: str, provider: str
+) -> tuple[UserIdentity, bool]:
+    """Find or create a user identity. Returns (identity, is_new_user)."""
+    identity = (
+        db.query(UserIdentity)
+        .filter(
+            UserIdentity.provider == provider,
+            UserIdentity.provider_id == identifier,
+        )
+        .first()
+    )
+    if identity:
+        return identity, False
+
+    # Create new user + identity
+    user = User(
+        id=uuid4(),
+        first_name="",
+        last_name="",
+    )
+    db.add(user)
+    db.flush()
+
+    identity = UserIdentity(
+        id=uuid4(),
+        user_id=user.id,
+        provider=provider,
+        provider_id=identifier,
+        is_verified=False,
+    )
+    db.add(identity)
     db.commit()
-    db.refresh(db_user)
-    return db_user
+    return identity, True
 
 
-def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-    user = get_user_by_email(db, email)
-    if not user or not user.hashed_password:
-        return None
-    if not verify_password(password, user.hashed_password):
-        return None
-    return user
+# Google id_token verification
+def verify_google_id_token(credential: str) -> dict:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID,
+        )
+        return idinfo
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Google token: {e}",
+        )
 
 
+# Current user dependency
 async def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme),
-    db: Session = Depends(get_database)
+    request: Request,
+    db: Session = Depends(get_database),
 ) -> Optional[User]:
+    token = request.cookies.get(AUTH_COOKIE_NAME)
     if not token:
         return None
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        user_id: str = payload.get("sub")
+        if user_id is None:
             return None
     except JWTError:
         return None
-    user = get_user_by_email(db, email)
+    try:
+        uid = UUID(user_id)
+    except (ValueError, AttributeError):
+        return None
+    user = db.query(User).filter(User.id == uid).first()
     return user
 
 
 async def get_current_user_required(
-    current_user: Optional[User] = Depends(get_current_user)
+    request: Request,
+    db: Session = Depends(get_database),
 ) -> User:
-    if not current_user:
+    user = await get_current_user(request, db)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
         )
-    return current_user
+    return user
 
 
-# Google OAuth helpers
-async def get_google_user_info(access_token: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to get Google user info")
-        return response.json()
+# Email sending
+def send_otp_email(to_email: str, otp: str) -> None:
+    if not SMTP_HOST:
+        # Log OTP in development when SMTP is not configured
+        import logging
 
+        logging.getLogger(__name__).warning(f"SMTP not configured. OTP for {to_email}: {otp}")
+        return
 
-def get_or_create_google_user(db: Session, google_user: dict) -> User:
-    email = google_user.get("email")
-    user = get_user_by_email(db, email)
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_FROM_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = "Your Login Code - Legal Search Buddy"
 
-    if user:
-        # Update OAuth info if needed
-        if not user.oauth_provider:
-            user.oauth_provider = "google"
-            user.oauth_id = google_user.get("id")
-            db.commit()
-        return user
+    body = f"""
+    <html>
+    <body>
+        <h2>Your verification code</h2>
+        <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px;">{otp}</p>
+        <p>This code expires in {OTP_EXPIRY_MINUTES} minutes.</p>
+        <p>If you didn't request this code, please ignore this email.</p>
+    </body>
+    </html>
+    """
+    msg.attach(MIMEText(body, "html"))
 
-    # Create new user
-    db_user = User(
-        email=email,
-        name=google_user.get("name"),
-        oauth_provider="google",
-        oauth_id=google_user.get("id")
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        if SMTP_USER:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_FROM_EMAIL or "noreply@localhost", to_email, msg.as_string())

@@ -53,14 +53,48 @@ END $$;
 -- Index on updated_at for incremental sync queries
 CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at);
 
--- Create users table for authentication
+-- Enable uuid-ossp extension for UUID generation
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- ==================== Auth Schema Migration ====================
+-- Migrate from old password-based users table to Identity-Provider pattern
+
+DO $$
+BEGIN
+    -- If old users table exists with 'email' column, drop it
+    -- (old schema: id SERIAL, email, hashed_password, name, oauth_provider, oauth_id, is_active)
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email') THEN
+        DROP TABLE IF EXISTS users CASCADE;
+    END IF;
+END $$;
+
+-- Create new users table with UUID PKs
 CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    hashed_password TEXT,
-    name TEXT,
-    oauth_provider TEXT,
-    oauth_id TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    first_name VARCHAR(50) NOT NULL DEFAULT '',
+    last_name VARCHAR(50) NOT NULL DEFAULT '',
+    year_of_birth INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT ck_users_year_of_birth CHECK (year_of_birth > 1900)
 );
+
+-- Create user_identities table
+CREATE TABLE IF NOT EXISTS user_identities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(20) NOT NULL,
+    provider_id VARCHAR(255) NOT NULL,
+    is_verified BOOLEAN DEFAULT FALSE,
+    UNIQUE(provider, provider_id)
+);
+
+-- Create otp_codes table
+CREATE TABLE IF NOT EXISTS otp_codes (
+    id SERIAL PRIMARY KEY,
+    identifier VARCHAR(255) NOT NULL,
+    otp_hash VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    attempts INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_otp_codes_identifier ON otp_codes(identifier);

@@ -273,7 +273,7 @@ def two_stage_filter(
     nlp: Any,
     text_getter: Callable[[DocT], str] | None = None,
     max_chars: int = 6000,
-    ner_max_chars: int = 3500,
+    ner_max_chars: int = 7000,
     ner_batch_size: int = 16,
 ) -> tuple[list[DocT], dict[str, Any]]:
     """
