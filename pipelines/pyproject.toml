@@ -24,6 +24,24 @@ ml = [
    "cupy-cuda12x>=13.0.0",
 ]
 
+# LLM provider SDKs - install with: uv sync --extra llm
+# Set the appropriate API key env var before running:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY
+llm = [
+   "anthropic>=0.40.0",
+   "openai>=1.0.0",
+   "google-generativeai>=0.8.0",
+]
+
+# Gemini Batch API - install with: uv sync --extra gemini-batch
+# Uses the newer google-genai SDK (separate from google-generativeai used by llm extra)
+# Env var: GOOGLE_API_KEY
+gemini-batch = [
+   "google-genai>=1.0.0",
+   "pymupdf>=1.26.7",
+   "google-cloud-storage>=2.0.0",  # required for Vertex AI mode (GCS input/output)
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 

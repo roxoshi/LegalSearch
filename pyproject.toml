@@ -42,6 +42,9 @@ module = [
     "en_legal_ner_trf.*",
     "app.*",
     "backend.app.*",
+    "anthropic.*",
+    "openai.*",
+    "google.generativeai.*",
 ]
 ignore_missing_imports = true
 
