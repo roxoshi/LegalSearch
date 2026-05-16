@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .database import get_database
-from .models import OTPCode, User, UserIdentity
+from .models import OTPCode, SubscriptionPlan, SubscriptionStatus, User, UserIdentity, UserSubscription
 
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
@@ -32,6 +32,8 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
 
+
+FREE_TRIAL_DAYS = 7
 OTP_EXPIRY_MINUTES = 5
 OTP_MAX_ATTEMPTS = 5
 
@@ -59,6 +61,29 @@ class ProfileUpdate(BaseModel):
     first_name: str
     last_name: str
     year_of_birth: Optional[int] = None
+
+
+class SubscriptionResponse(BaseModel):
+    plan: str
+    status: str
+    trial_end: Optional[str]
+    is_trial_active: bool
+
+    @classmethod
+    def from_subscription(cls, sub: "UserSubscription") -> "SubscriptionResponse":
+        now = datetime.now(timezone.utc)
+        is_trial_active = (
+            sub.plan.value == "trial"
+            and sub.status.value == "active"
+            and sub.trial_end is not None
+            and now < sub.trial_end
+        )
+        return cls(
+            plan=sub.plan.value,
+            status=sub.status.value,
+            trial_end=sub.trial_end.isoformat() if sub.trial_end else None,
+            is_trial_active=is_trial_active,
+        )
 
 
 class UserResponse(BaseModel):
@@ -92,6 +117,7 @@ def is_email(identifier: str) -> bool:
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", identifier))
 
 
+
 # JWT helpers
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -103,12 +129,24 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def set_auth_cookie(response: Response, token: str) -> None:
+    _cookie_secure_env = os.getenv("COOKIE_SECURE", "auto").lower()
+    if _cookie_secure_env == "auto":
+        secure = os.getenv("ENVIRONMENT", "development") not in ("development", "dev")
+    else:
+        secure = _cookie_secure_env in ("true", "1", "yes")
+
+    # Over plain HTTP (secure=False) don't set SameSite at all — browsers treat
+    # omitted SameSite as "no restriction", which avoids Safari/WebKit cross-port
+    # quirks when the frontend (:3000) and backend (:8000) share the same LAN IP.
+    # Over HTTPS the cookie is same-site by default so Lax is correct.
+    samesite: str | None = "lax" if secure else None
+
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=os.getenv("ENVIRONMENT", "development") not in ("development", "dev"),
-        samesite="lax",
+        secure=secure,
+        samesite=samesite,
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
@@ -134,7 +172,7 @@ def get_or_create_identity(
     if identity:
         return identity, False
 
-    # Create new user + identity
+    # Create new user + identity + trial subscription
     user = User(
         id=uuid4(),
         first_name="",
@@ -151,6 +189,17 @@ def get_or_create_identity(
         is_verified=False,
     )
     db.add(identity)
+
+    now = datetime.now(timezone.utc)
+    subscription = UserSubscription(
+        user_id=user.id,
+        plan=SubscriptionPlan.trial,
+        status=SubscriptionStatus.active,
+        trial_start=now,
+        trial_end=now + timedelta(days=FREE_TRIAL_DAYS),
+    )
+    db.add(subscription)
+
     db.commit()
     return identity, True
 
@@ -222,7 +271,7 @@ def send_otp_email(to_email: str, otp: str) -> None:
     msg = MIMEMultipart()
     msg["From"] = SMTP_FROM_EMAIL
     msg["To"] = to_email
-    msg["Subject"] = "Your Login Code - Legal Search Buddy"
+    msg["Subject"] = "Your Login Code - TaxLens"
 
     body = f"""
     <html>
@@ -241,3 +290,5 @@ def send_otp_email(to_email: str, otp: str) -> None:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
         server.sendmail(SMTP_FROM_EMAIL or "noreply@localhost", to_email, msg.as_string())
+
+

@@ -20,8 +20,9 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   requestOtp: (identifier: string) => Promise<void>;
-  verifyOtp: (identifier: string, otp: string, profile?: ProfileData) => Promise<{ needs_profile: boolean }>;
+  verifyOtp: (identifier: string, otp: string, profile?: ProfileData) => Promise<{ needs_profile: boolean; trial_end?: string | null }>;
   loginWithGoogle: (credential: string) => Promise<{ needs_profile: boolean }>;
+  devLogin: (email: string, firstName?: string, lastName?: string) => Promise<void>;
   updateProfile: (profile: ProfileData) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     identifier: string,
     otp: string,
     profile?: ProfileData
-  ): Promise<{ needs_profile: boolean }> => {
+  ): Promise<{ needs_profile: boolean; trial_end?: string | null }> => {
     const apiUrl = getApiUrl();
     const res = await fetch(`${apiUrl}/auth/verify-otp`, {
       method: 'POST',
@@ -93,7 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!data.needs_profile) {
       setUser(data.user);
     }
-    return { needs_profile: data.needs_profile };
+    return {
+      needs_profile: data.needs_profile,
+      trial_end: data.subscription?.trial_end ?? null,
+    };
   };
 
   const loginWithGoogle = async (credential: string): Promise<{ needs_profile: boolean }> => {
@@ -115,6 +119,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
     }
     return { needs_profile: data.needs_profile };
+  };
+
+  const devLogin = async (email: string, firstName = 'Dev', lastName = 'User') => {
+    const apiUrl = getApiUrl();
+    const res = await fetch(`${apiUrl}/auth/dev-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, first_name: firstName, last_name: lastName }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(error.detail || 'Dev login failed');
+    }
+    const data = await res.json();
+    setUser(data.user);
   };
 
   const updateProfile = async (profile: ProfileData) => {
@@ -149,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, requestOtp, verifyOtp, loginWithGoogle, updateProfile, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, requestOtp, verifyOtp, loginWithGoogle, devLogin, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -8,4 +8,11 @@ class SearchResult(BaseModel):
     title: str
     citation: str
     content: str
+    court: str
+    decision_date: str
     rrf_score: float
+
+
+class PartyOptions(BaseModel):
+    petitioners: list[str]
+    respondents: list[str]

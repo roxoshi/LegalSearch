@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeftIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, DocumentArrowDownIcon } from '@heroicons/react/24/outline';
 import { getApiUrl } from '@/lib/api';
 
 export default function DocumentDetailsPage() {
@@ -10,8 +10,6 @@ export default function DocumentDetailsPage() {
   const router = useRouter();
   const [doc, setDoc] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
   const [apiUrl, setApiUrl] = useState('');
 
   useEffect(() => {
@@ -34,21 +32,6 @@ export default function DocumentDetailsPage() {
     };
     fetchDoc();
   }, [id, apiUrl]);
-
-  const generateSummary = async () => {
-    setSummaryLoading(true);
-    try {
-      const res = await fetch(`${apiUrl}/document/${id}/summary`);
-      if (!res.ok) throw new Error('Failed to generate summary');
-      const data = await res.json();
-      setSummary(data.summary);
-    } catch (err) {
-      console.error('Failed to generate summary', err);
-      setSummary('Failed to generate summary. Please try again.');
-    } finally {
-      setSummaryLoading(false);
-    }
-  };
 
   if (loading) return (
     <div className="flex justify-center items-center min-h-screen">
@@ -88,60 +71,34 @@ export default function DocumentDetailsPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
           <div className="lg:col-span-2">
-            <div className="prose prose-slate max-w-none">
-              <h3 className="text-lg font-semibold text-slate-800 mb-4 uppercase tracking-wider">Judgment Content</h3>
-              <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm leading-relaxed text-slate-700">
-                {doc.display_content ? (
-                  <div
-                    className="judgment-content"
-                    dangerouslySetInnerHTML={{ __html: doc.display_content }}
-                  />
-                ) : (
-                  <div className="whitespace-pre-wrap">
-                    {doc.content}
-                  </div>
-                )}
-              </div>
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm leading-relaxed text-slate-700 text-sm">
+              <style>{`
+                .judgment-content h2 {
+                  font-size: 1.1rem;
+                  font-weight: 700;
+                  color: #1e293b;
+                  margin-top: 1.75rem;
+                  margin-bottom: 0.5rem;
+                }
+                .judgment-content h2:first-child {
+                  margin-top: 0;
+                }
+                .judgment-content p {
+                  margin-bottom: 0.75rem;
+                }
+              `}</style>
+              {doc.display_content ? (
+                <div
+                  className="judgment-content"
+                  dangerouslySetInnerHTML={{ __html: doc.display_content }}
+                />
+              ) : (
+                <div className="whitespace-pre-wrap">{doc.content}</div>
+              )}
             </div>
           </div>
 
           <aside className="space-y-6">
-            {/* AI Summary Section */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100">
-              <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-                <SparklesIcon className="w-5 h-5 text-blue-600" />
-                AI Summary
-              </h3>
-              {summary ? (
-                <div className="text-sm text-slate-700 leading-relaxed">
-                  {summary}
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm text-slate-600 mb-4">
-                    Generate an AI-powered summary of this case to quickly understand the key points.
-                  </p>
-                  <button
-                    onClick={generateSummary}
-                    disabled={summaryLoading}
-                    className="w-full py-2 px-4 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {summaryLoading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <SparklesIcon className="w-4 h-4" />
-                        Generate Summary
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-
             {/* Case Metadata */}
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
               <h3 className="font-semibold text-slate-900 mb-4">Case Metadata</h3>
@@ -163,6 +120,20 @@ export default function DocumentDetailsPage() {
                   <p className="font-medium">{doc.citation}</p>
                 </div>
               </div>
+            </div>
+
+            {/* Original Judgment Download */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+              <h3 className="font-semibold text-slate-900 mb-3">Original Judgment</h3>
+              <a
+                href={`${apiUrl}/document/${id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2 px-4 bg-slate-800 text-white rounded-xl text-sm font-medium hover:bg-slate-900 transition-colors"
+              >
+                <DocumentArrowDownIcon className="w-4 h-4" />
+                Download PDF
+              </a>
             </div>
           </aside>
         </div>

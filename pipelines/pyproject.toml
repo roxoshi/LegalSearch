@@ -12,6 +12,8 @@ dependencies = [
    "pyarrow",
    "tqdm",
    "spacy>=3.8.11",
+   "scikit-learn>=1.8.0",
+   "joblib>=1.5.3",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +33,7 @@ llm = [
    "anthropic>=0.40.0",
    "openai>=1.0.0",
    "google-generativeai>=0.8.0",
+   "tiktoken>=0.7.0",
 ]
 
 # Gemini Batch API - install with: uv sync --extra gemini-batch

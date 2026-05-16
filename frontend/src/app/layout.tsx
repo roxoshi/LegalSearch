@@ -2,12 +2,13 @@ import "./globals.css"; // Ensure this file exists for Tailwind
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Providers } from "@/components/Providers";
+import { AppLayout } from "@/components/AppLayout";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Legal Search Buddy",
-  description: "High-fidelity legal document search with FastAPI and pgvector",
+  title: "TaxLens",
+  description: "Semantic search for GST legal judgments",
 };
 
 export default function RootLayout({
@@ -19,9 +20,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.className} bg-gray-50 text-slate-900 antialiased`}>
         <Providers>
-          <div className="min-h-screen">
-            {children}
-          </div>
+          <AppLayout>{children}</AppLayout>
         </Providers>
       </body>
     </html>

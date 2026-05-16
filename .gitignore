@@ -221,4 +221,6 @@ pipelines/.venv
 pipelines/pdf_files
 pipelines/html_files
 frontend/.next
+frontend/tsconfig.tsbuildinfo
 .idea
+memory/

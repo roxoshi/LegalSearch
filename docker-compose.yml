@@ -27,7 +27,13 @@ services:
         - BASE_IMAGE=${BACKEND_BASE_IMAGE:-python:3.13-slim}
     restart: always
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-search_db}
+      # Pass credentials individually so the backend can URL-encode special
+      # characters (e.g. '+') via quote_plus — a pre-built DATABASE_URL would
+      # embed the raw password and break psycopg2's URL parser.
+      - POSTGRES_USER=${POSTGRES_USER:?Set POSTGRES_USER in your env file}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your env file}
+      - POSTGRES_DB=${POSTGRES_DB:-search_db}
+      - POSTGRES_HOST=db
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in your env file}
       - ENVIRONMENT=${ENVIRONMENT:-staging}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
@@ -38,6 +44,16 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      - COOKIE_SECURE=${COOKIE_SECURE:-auto}
+      - PDF_DIR=/app/pdfs
+      - ACTS_DIR=/app/acts
+      - NOTIF_PDF_DIR=/app/notif_pdfs
+      - CIRCULAR_PDF_DIR=/app/circular_pdfs
+    volumes:
+      - ${PDF_DIR:-.data/gst_pdfs}:/app/pdfs:ro
+      - ${ACTS_DIR:-.data/acts}:/app/acts:ro
+      - ${NOTIF_PDF_DIR:-.data/notifications/pdfs}:/app/notif_pdfs:ro
+      - ${CIRCULAR_PDF_DIR:-.data/circulars/pdfs}:/app/circular_pdfs:ro
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +67,7 @@ services:
       args:
         - NEXT_PUBLIC_API_PORT=${NEXT_PUBLIC_API_PORT:-8000}
         - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        - NEXT_PUBLIC_ENABLE_DEV_LOGIN=${ENABLE_DEV_LOGIN:-false}
     restart: always
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

@@ -243,6 +243,30 @@ class TestKeywordPrefilter:
         assert is_gst is True
         assert "composition scheme" in matched
 
+    def test_wbgst_matches(self):
+        """State GST compound form WBGST should match without enumerating state codes."""
+        is_gst, matched = keyword_prefilter("The WBGST Act, 2017 applies to this transaction")
+        assert is_gst is True
+        assert "wbgst" in matched
+
+    def test_gangster_does_not_match(self):
+        """'gangster' contains 'gst' as substring but should not match (lowercase context)."""
+        is_gst, matched = keyword_prefilter("The gangster was convicted under IPC")
+        assert is_gst is False
+        assert len(matched) == 0
+
+    def test_other_state_gst_variants_match(self):
+        """Other state GST compound forms should match without enumeration."""
+        cases = [
+            ("KGST provisions apply", "kgst"),
+            ("Under the UPGST Act", "upgst"),
+            ("TNGST registration required", "tngst"),
+        ]
+        for text, expected_token in cases:
+            is_gst, matched = keyword_prefilter(text)
+            assert is_gst is True, f"Failed for: {text}"
+            assert expected_token in matched, f"Expected '{expected_token}' in {matched}"
+
 
 # ============================================================================
 # Tests for PyMuPDF text extraction

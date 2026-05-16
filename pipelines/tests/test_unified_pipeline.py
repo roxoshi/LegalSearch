@@ -208,8 +208,8 @@ class TestDocumentData:
         assert doc.judge == "Unknown"
         assert doc.court == "Unknown Court"
         assert doc.text_content == ""
-        assert doc.chunks == []
-        assert doc.embeddings == []
+        assert doc.extracted_provisions == []
+        assert doc.extracted_statutes == []
 
     def test_custom_values(self):
         """Custom values should be stored correctly."""
@@ -232,10 +232,10 @@ class TestDocumentData:
         doc1 = DocumentData(case_id="1", title="Doc 1")
         doc2 = DocumentData(case_id="2", title="Doc 2")
 
-        doc1.chunks.append("chunk1")
+        doc1.extracted_provisions.append("Section 73")
 
-        assert len(doc1.chunks) == 1
-        assert len(doc2.chunks) == 0
+        assert len(doc1.extracted_provisions) == 1
+        assert len(doc2.extracted_provisions) == 0
 
 
 # ============================================================================
@@ -291,51 +291,27 @@ class TestIntegration:
 
 
 # ============================================================================
-# Tests for ONNX Integration
+# Tests for pipeline signature
 # ============================================================================
 
 
-class TestONNXIntegration:
-    """Tests for ONNX embeddings integration."""
+class TestPipelineSignature:
+    """Tests for the run_pipeline function signature after refactor."""
 
-    def test_onnx_embedder_import(self):
-        """Verify ONNXEmbedder can be imported from unified_pipeline."""
-        from pipelines.unified_pipeline import ONNXEmbedder
-
-        embedder = ONNXEmbedder()
-        assert embedder.model_name == "sentence-transformers/all-MiniLM-L6-v2"
-
-    def test_run_pipeline_accepts_use_onnx_param(self):
-        """Verify run_pipeline accepts use_onnx parameter."""
-        import inspect
-
-        from pipelines.unified_pipeline import run_pipeline
-
+    def test_run_pipeline_no_use_onnx_param(self):
+        """run_pipeline no longer has use_onnx (embedding removed from pipeline)."""
         sig = inspect.signature(run_pipeline)
-        assert "use_onnx" in sig.parameters
-        assert sig.parameters["use_onnx"].default is False
+        assert "use_onnx" not in sig.parameters
 
-    def test_onnx_embedder_encode_interface(self):
-        """Verify ONNXEmbedder has same interface as EmbeddingModel."""
-        import numpy as np
+    def test_run_pipeline_no_model_name_param(self):
+        """run_pipeline no longer has model_name (embedding removed from pipeline)."""
+        sig = inspect.signature(run_pipeline)
+        assert "model_name" not in sig.parameters
 
-        from pipelines.unified_pipeline import ONNXEmbedder
-
-        embedder = ONNXEmbedder()
-
-        # Mock the internal model to avoid loading real model
-        with patch.object(embedder, "_ensure_initialized"):
-            embedder._initialized = True
-            embedder._use_onnx = False
-
-            mock_model = MagicMock()
-            mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-            embedder.model = mock_model
-
-            result = embedder.encode(["test text"])
-
-            assert isinstance(result, list)
-            assert len(result) == 1
+    def test_run_pipeline_no_db_url_param(self):
+        """run_pipeline no longer has db_url (DB insert removed from pipeline)."""
+        sig = inspect.signature(run_pipeline)
+        assert "db_url" not in sig.parameters
 
 
 # ============================================================================
@@ -589,7 +565,7 @@ class TestTwoStagePipeline:
             assert imp.extracted_statutes == orig.extracted_statutes
 
     def test_run_pipeline_export_mode_stops_after_filter(self, tmp_path):
-        """Steps 4-6 NOT called when export mode is active."""
+        """Pipeline stops after export; no further steps are taken."""
         export_dir = str(tmp_path / "export")
         fake_doc = DocumentData(
             case_id="test-1",
@@ -605,9 +581,6 @@ class TestTwoStagePipeline:
                 "pipelines.unified_pipeline.parallel_extract_from_zips", return_value=[fake_doc]
             ),
             patch("pipelines.unified_pipeline.parallel_extract_from_tars", return_value=[]),
-            patch("pipelines.unified_pipeline.parallel_convert_pdfs") as mock_convert,
-            patch("pipelines.unified_pipeline.batch_chunk_and_embed") as mock_embed,
-            patch("pipelines.unified_pipeline.bulk_insert_to_db") as mock_db,
         ):
             result = run_pipeline(
                 metadata_dir="/fake",
@@ -618,10 +591,8 @@ class TestTwoStagePipeline:
 
         # Export should have been created
         assert result == 1
-        # Steps 4-6 should NOT have been called
-        mock_convert.assert_not_called()
-        mock_embed.assert_not_called()
-        mock_db.assert_not_called()
+        # JSONL should exist
+        assert (Path(export_dir) / "export.jsonl").exists()
 
     def test_run_pipeline_import_mode_skips_steps_1_to_3(self, tmp_path):
         """Steps 1-3 NOT called when import mode is active."""
@@ -645,9 +616,6 @@ class TestTwoStagePipeline:
             patch("pipelines.unified_pipeline.load_hc_metadata") as mock_hc,
             patch("pipelines.unified_pipeline.parallel_extract_from_zips") as mock_extract_sc,
             patch("pipelines.unified_pipeline.parallel_extract_from_tars") as mock_extract_hc,
-            patch("pipelines.unified_pipeline.parallel_convert_pdfs", side_effect=lambda d: d),
-            patch("pipelines.unified_pipeline.batch_chunk_and_embed", side_effect=lambda d, m, s: d),
-            patch("pipelines.unified_pipeline.bulk_insert_to_db"),
         ):
             result = run_pipeline(
                 metadata_dir="/fake",

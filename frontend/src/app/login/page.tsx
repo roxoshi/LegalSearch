@@ -9,7 +9,9 @@ type Step = 'email' | 'otp' | 'profile';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { requestOtp, verifyOtp, loginWithGoogle, updateProfile } = useAuth();
+  const { requestOtp, verifyOtp, loginWithGoogle, devLogin, updateProfile } = useAuth();
+  const devLoginEnabled = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === 'true';
+  const googleEnabled = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
@@ -17,6 +19,7 @@ export default function LoginPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [yearOfBirth, setYearOfBirth] = useState('');
+  const [trialEndDate, setTrialEndDate] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -28,7 +31,7 @@ export default function LoginPage() {
       await requestOtp(email);
       setStep('otp');
     } catch (err: any) {
-      setError(err.message || 'Failed to send OTP');
+      setError(err.message || 'Failed to send code');
     } finally {
       setLoading(false);
     }
@@ -41,6 +44,10 @@ export default function LoginPage() {
     try {
       const result = await verifyOtp(email, otp);
       if (result.needs_profile) {
+        if (result.trial_end) {
+          const d = new Date(result.trial_end);
+          setTrialEndDate(d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }));
+        }
         setStep('profile');
       } else {
         router.push('/');
@@ -92,10 +99,10 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-light tracking-tight text-slate-800 mb-2">
-            Legal Search <span className="font-bold text-blue-600">Buddy</span>
+            Tax<span className="font-bold text-blue-600">Lens</span>
           </h1>
           <p className="text-slate-500">
-            {step === 'email' && 'Sign in to your account'}
+            {step === 'email' && 'Sign in or create an account'}
             {step === 'otp' && 'Enter the code sent to your email'}
             {step === 'profile' && 'Complete your profile'}
           </p>
@@ -120,6 +127,7 @@ export default function LoginPage() {
                     required
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                     placeholder="you@example.com"
+                    autoFocus
                   />
                 </div>
                 <button
@@ -131,24 +139,59 @@ export default function LoginPage() {
                 </button>
               </form>
 
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-white text-slate-500">or continue with</span>
-                </div>
-              </div>
+              {googleEnabled && (
+                <>
+                  <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-200"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                      <span className="px-4 bg-white text-slate-500">or continue with</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-center">
+                    <GoogleLogin
+                      onSuccess={handleGoogleSuccess}
+                      onError={() => setError('Google login failed')}
+                      size="large"
+                      width="100%"
+                      text="continue_with"
+                    />
+                  </div>
+                </>
+              )}
 
-              <div className="flex justify-center">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => setError('Google login failed')}
-                  size="large"
-                  width="100%"
-                  text="continue_with"
-                />
-              </div>
+              {devLoginEnabled && (
+                <>
+                  <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-amber-200"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                      <span className="px-4 bg-white text-amber-600">dev only</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true);
+                      setError('');
+                      try {
+                        await devLogin('dev@test.local', 'Dev', 'User');
+                        router.push('/');
+                      } catch (err: any) {
+                        setError(err.message || 'Dev login failed');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="w-full py-2 px-4 bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-sm font-medium hover:bg-amber-200 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Logging in...' : 'Dev Login (skip auth)'}
+                  </button>
+                </>
+              )}
             </>
           )}
 
@@ -161,6 +204,7 @@ export default function LoginPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Verification Code</label>
                 <input
                   type="text"
+                  inputMode="numeric"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   required
@@ -189,6 +233,12 @@ export default function LoginPage() {
 
           {step === 'profile' && (
             <form onSubmit={handleProfileSubmit} className="space-y-4">
+              {trialEndDate && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-sm text-center">
+                  <span className="font-semibold">7-day free trial</span> — full access until{' '}
+                  <span className="font-medium">{trialEndDate}</span>. No card required.
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">First Name</label>
                 <input
@@ -213,7 +263,7 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Year of Birth (optional)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Year of Birth <span className="text-slate-400 font-normal">(optional)</span></label>
                 <input
                   type="number"
                   value={yearOfBirth}
@@ -229,11 +279,17 @@ export default function LoginPage() {
                 disabled={loading}
                 className="w-full py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Saving...' : 'Complete Profile'}
+                {loading ? 'Saving...' : 'Start Free Trial'}
               </button>
             </form>
           )}
         </div>
+
+        {step === 'email' && (
+          <p className="text-center text-xs text-slate-400 mt-4">
+            New users get a 7-day free trial. No credit card required.
+          </p>
+        )}
       </div>
     </div>
   );

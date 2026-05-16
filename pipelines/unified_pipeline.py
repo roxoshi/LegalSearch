@@ -1,14 +1,14 @@
 """
-Unified Optimized Data Pipeline for LegalSearch - V3 (TIER 1 OPTIMIZATIONS)
+Unified Data Pipeline for LegalSearch — Shard → Filter → Export
 
-Optimizations:
-1. Two-stage keyword pre-filter (skips 80%+ of NER inference)
-2. PyMuPDF text extraction (10-50x faster than pdfplumber)
-3. Batch NER inference using spaCy's nlp.pipe() (5-10x faster)
-4. Parallel PDF extraction with multiprocessing
-5. Parallel PDF to HTML conversion (more workers)
-6. Larger embedding batch sizes
-7. Process all records in one go (no small batches)
+This pipeline handles Steps 1-3 of the data flow:
+  1. Load metadata from parquet files (SC and/or HC)
+  2. Extract PDFs in parallel from zip/tar archives
+  3. NER-based GST relevance filtering (two-stage: keyword → NER)
+  [4. Optionally export filtered docs to disk for handoff to ETL]
+
+Steps 4-6 (HTML conversion, embedding, DB insert) are now handled by
+``etl/ingest.py``, which reads the LLM-produced JSON analysis files.
 """
 
 import argparse
@@ -19,15 +19,12 @@ import shutil
 import sys
 import warnings
 import zipfile
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Any
 
 # Preload pip-installed NVIDIA CUDA shared libs so CuPy can find them.
-# PyTorch handles this internally, but CuPy uses dlopen which needs the libs
-# visible at process level. Without this, spaCy GPU support silently fails.
 import ctypes as _ctypes
 import glob as _glob
 
@@ -35,7 +32,6 @@ for _lib in _glob.glob(
     os.path.join(sys.prefix, "lib", "python*", "site-packages", "nvidia", "*", "lib", "*.so.*")
 ):
     # Skip libnvblas — it intercepts BLAS calls and crashes without a config file.
-    # PyTorch and spaCy use cuBLAS directly and don't need the NVBLAS shim.
     if "libnvblas" in _lib:
         continue
     try:
@@ -52,9 +48,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
-# Import optimizations
 from pipelines.optimizations import (  # noqa: E402
-    ONNXEmbedder,
     extract_text_pymupdf,
     two_stage_filter,
 )
@@ -73,7 +67,6 @@ logging.basicConfig(
 logger = logging.getLogger("unified_pipeline")
 
 # Reduce noise from other loggers
-logging.getLogger("app.embeddings").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.WARNING)
 logging.getLogger("safetensors").setLevel(logging.WARNING)
 
@@ -96,7 +89,6 @@ KEEP_COLUMNS = [
 
 GST_STATUTES_KEYWORDS = ["goods and services", "goods & services"]
 MAX_TEXT_CHARS = 6000
-EMBEDDING_BATCH_SIZE = 1024  # Increased for speed
 NUM_WORKERS = max(4, cpu_count())
 
 
@@ -117,12 +109,9 @@ class DocumentData:
     text_content: str = ""
     pdf_bytes: bytes | None = None
     pdf_staging_path: str | None = None
-    display_html: str | None = None
     is_gst_core: bool | None = None
     extracted_provisions: list[str] = field(default_factory=list)
     extracted_statutes: list[str] = field(default_factory=list)
-    chunks: list[str] = field(default_factory=list)
-    embeddings: list[list[float]] = field(default_factory=list)
 
 
 def load_ner_model():
@@ -139,8 +128,6 @@ def load_ner_model():
             except Exception:
                 pass
         else:
-            # Maximize CPU parallelism for PyTorch ops (matrix multiply, etc.)
-            # By default PyTorch may only use 1-2 threads.
             cpu_threads = os.cpu_count() or 4
             torch.set_num_threads(cpu_threads)
             torch.set_num_interop_threads(min(4, cpu_threads))
@@ -150,12 +137,11 @@ def load_ner_model():
 
     nlp = None
 
-    # Try loading from multiple paths: local dev, Docker, then package name
     local_model_dir = str(Path(__file__).resolve().parent.parent / ".data" / "models" / "en_legal_ner_trf")
     model_paths = [
-        local_model_dir,                   # Local dev path (.data/models/)
-        "/app/models/en_legal_ner_trf",    # Docker path
-        "en_legal_ner_trf",                # Installed package name
+        local_model_dir,
+        "/app/models/en_legal_ner_trf",
+        "en_legal_ner_trf",
     ]
 
     for path in model_paths:
@@ -174,9 +160,6 @@ def load_ner_model():
             "  uv run python scripts/install_spacy_model.py"
         )
 
-    # Disable pipe components we don't need — only transformer + NER are
-    # required. Other pipes (sentencizer, tok2vec, tagger, parser, etc.)
-    # add overhead per document without contributing to entity extraction.
     required_pipes = {"transformer", "ner"}
     unused_pipes = [name for name in nlp.pipe_names if name not in required_pipes]
     if unused_pipes:
@@ -188,22 +171,22 @@ def load_ner_model():
     return nlp
 
 
-def batch_ner_filter(docs: list[DocumentData], nlp) -> list[DocumentData]:
-    """
-    Two-stage document filtering:
-    1. Fast keyword pre-filter (skips 80%+ of non-GST docs)
-    2. Batch NER inference only on candidates
+def batch_ner_filter(
+    docs: list[DocumentData],
+    nlp,
+    negatives_path: str = ".data/logs/classifier_negatives.jsonl",
+) -> list[DocumentData]:
+    """Two-stage document filtering: keyword pre-filter → batch NER inference.
 
-    This is 5-10x faster than processing all documents with NER.
+    Stage 2 rejects (passed keyword filter but failed NER) are written to
+    negatives_path as JSONL for use as training data for the GST classifier.
     """
     logger.info(f"Starting two-stage filter on {len(docs)} documents...")
 
-    # Use the optimized two-stage filter
     filtered, stats = two_stage_filter(
         docs, nlp, text_getter=lambda d: d.text_content[:MAX_TEXT_CHARS], max_chars=MAX_TEXT_CHARS
     )
 
-    # Log statistics
     logger.info(
         f"Stage 1 (Keywords): {stats['passed_keyword_filter']}/{stats['total']} passed "
         f"({stats['rejected_by_keyword']} filtered out - {stats['keyword_filter_rate'] * 100:.1f}% reduction)"
@@ -212,6 +195,24 @@ def batch_ner_filter(docs: list[DocumentData], nlp) -> list[DocumentData]:
         f"Stage 2 (NER): {stats['passed_ner']}/{stats['passed_keyword_filter']} are GST-relevant"
     )
     logger.info(f"Final: {len(filtered)}/{len(docs)} documents selected")
+
+    keyword_rejects: list[DocumentData] = stats.get("keyword_rejects", [])
+    if keyword_rejects:
+        Path(negatives_path).parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        with open(negatives_path, "a", encoding="utf-8") as f:
+            for doc in keyword_rejects:
+                record = {
+                    "case_id": doc.case_id,
+                    "label": 0,
+                    "text": doc.text_content[:MAX_TEXT_CHARS],
+                    "court": doc.court,
+                    "year": doc.year,
+                    "decision_date": doc.decision_date,
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                written += 1
+        logger.info(f"Saved {written} keyword rejects (clean negatives) to {negatives_path}")
 
     return filtered
 
@@ -275,7 +276,6 @@ def export_after_filter(docs: list[DocumentData], export_dir: str) -> int:
             safe_id = _sanitize_filename(doc.case_id)
             pdf_filename: str | None = None
 
-            # Save PDF: move from HC staging or write SC bytes
             if doc.pdf_staging_path and Path(doc.pdf_staging_path).exists():
                 pdf_filename = f"{safe_id}.pdf"
                 shutil.move(doc.pdf_staging_path, str(pdfs_path / pdf_filename))
@@ -310,15 +310,11 @@ def export_after_filter(docs: list[DocumentData], export_dir: str) -> int:
 def import_filtered_docs(import_dir: str) -> list[DocumentData]:
     """Import previously exported documents from disk.
 
-    Reads the JSONL manifest and reconstructs DocumentData objects. PDFs are
-    referenced via `pdf_staging_path` so that `_convert_single_pdf` can read
-    and delete them (the export is consumed).
-
     Args:
         import_dir: Directory containing export.jsonl and pdfs/
 
     Returns:
-        List of DocumentData ready for Steps 4-6
+        List of DocumentData with pdf_staging_path set
 
     Raises:
         FileNotFoundError: If export.jsonl is missing
@@ -386,7 +382,6 @@ def _extract_single_record(args) -> DocumentData | None:
             all_files = zf.namelist()
             filename = os.path.basename(record.get("path", ""))
 
-            # Find target file
             target = next((f for f in all_files if f.lower().endswith(filename.lower())), None)
             if not target:
                 base = filename.rsplit(".", 1)[0]
@@ -425,7 +420,6 @@ def parallel_extract_from_zips(records: list[dict], judgments_dir: str) -> list[
 
     args_list = [(r, judgments_dir) for r in records]
 
-    docs = []
     with ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
         results = list(
             tqdm(
@@ -441,210 +435,6 @@ def parallel_extract_from_zips(records: list[dict], judgments_dir: str) -> list[
     return docs
 
 
-def _convert_single_pdf(doc: DocumentData) -> DocumentData:
-    """Convert single PDF to HTML.
-
-    Reads from pdf_staging_path (disk) if available, otherwise falls back
-    to pdf_bytes (in-memory). Frees both after conversion.
-    """
-    import tempfile
-
-    from pipelines.convert_pdf import convert_pdf_to_html
-
-    pdf_path: str | None = None
-    temp_path: str | None = None
-
-    try:
-        if doc.pdf_staging_path and Path(doc.pdf_staging_path).exists():
-            # Read from staging file (memory-efficient path)
-            pdf_path = doc.pdf_staging_path
-        elif doc.pdf_bytes:
-            # Fallback: write in-memory bytes to temp file (SC path)
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-                f.write(doc.pdf_bytes)
-                temp_path = f.name
-            pdf_path = temp_path
-
-        if pdf_path:
-            doc.display_html = convert_pdf_to_html(Path(pdf_path))
-        else:
-            doc.display_html = f"<p>{doc.text_content}</p>"
-    except Exception:
-        doc.display_html = f"<p>{doc.text_content}</p>"
-    finally:
-        # Clean up staging file
-        if doc.pdf_staging_path:
-            Path(doc.pdf_staging_path).unlink(missing_ok=True)
-            doc.pdf_staging_path = None
-        # Clean up temp file (SC fallback)
-        if temp_path:
-            Path(temp_path).unlink(missing_ok=True)
-        doc.pdf_bytes = None  # Free memory
-
-    return doc
-
-
-def parallel_convert_pdfs(docs: list[DocumentData]) -> list[DocumentData]:
-    """Convert PDFs to HTML in parallel."""
-    logger.info(f"Converting {len(docs)} PDFs to HTML ({NUM_WORKERS} workers)...")
-
-    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-        results = list(
-            tqdm(
-                executor.map(_convert_single_pdf, docs),
-                total=len(docs),
-                desc="PDF to HTML",
-                unit="doc",
-            )
-        )
-
-    return results
-
-
-def batch_chunk_and_embed(docs: list[DocumentData], model, splitter) -> list[DocumentData]:
-    """Chunk and embed all documents with large batch sizes."""
-
-    # Phase 1: Chunk all documents
-    logger.info("Chunking documents...")
-    all_chunks = []
-    chunk_counts = []
-
-    for doc in tqdm(docs, desc="Chunking", unit="doc"):
-        if doc.text_content:
-            chunks = splitter.split_text(doc.text_content)
-            doc.chunks = chunks
-            chunk_counts.append(len(chunks))
-            all_chunks.extend(chunks)
-        else:
-            doc.chunks = []
-            chunk_counts.append(0)
-
-    total_chunks = len(all_chunks)
-    logger.info(f"Total chunks: {total_chunks}")
-
-    if not all_chunks:
-        return docs
-
-    # Phase 2: Batch embed - use large batch size for speed
-    logger.info(
-        f"Generating embeddings for {total_chunks} chunks (batch size: {EMBEDDING_BATCH_SIZE})..."
-    )
-
-    all_embeddings = []
-    for i in tqdm(range(0, total_chunks, EMBEDDING_BATCH_SIZE), desc="Embeddings", unit="batch"):
-        batch = all_chunks[i : i + EMBEDDING_BATCH_SIZE]
-        batch_embeddings = model.encode(batch, show_progress_bar=False, batch_size=128)
-        # Handle both numpy arrays (EmbeddingModel) and lists (ONNXEmbedder)
-        if hasattr(batch_embeddings, "tolist"):
-            all_embeddings.extend(batch_embeddings.tolist())
-        else:
-            all_embeddings.extend(batch_embeddings)
-
-    # Distribute embeddings back
-    idx = 0
-    for doc, count in zip(docs, chunk_counts):
-        doc.embeddings = all_embeddings[idx : idx + count]
-        idx += count
-
-    return docs
-
-
-def bulk_insert_to_db(docs: list[DocumentData], db_url: str):
-    """Insert all documents to database using bulk operations."""
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import sessionmaker
-
-    try:
-        from backend.app.models import Base, Document, DocumentChunk
-    except ImportError:
-        from app.models import Base, Document, DocumentChunk  # type: ignore[no-redef]
-
-    logger.info(f"Inserting {len(docs)} documents to database...")
-
-    engine = create_engine(db_url)
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    with SessionLocal() as db:
-        # Clear existing if needed
-        existing_ids = {r[0] for r in db.execute(text("SELECT case_id FROM documents")).fetchall()}
-        case_ids = [doc.case_id for doc in docs]
-        overlap = set(case_ids) & existing_ids
-
-        if overlap:
-            logger.info(f"Removing {len(overlap)} existing documents...")
-            db.execute(
-                text(
-                    "DELETE FROM document_chunks WHERE document_id IN (SELECT id FROM documents WHERE case_id = ANY(:ids))"
-                ),
-                {"ids": list(overlap)},
-            )
-            db.execute(
-                text("DELETE FROM documents WHERE case_id = ANY(:ids)"), {"ids": list(overlap)}
-            )
-            db.commit()
-
-        # Bulk insert documents
-        logger.info("Inserting documents...")
-        db_docs = []
-        for doc in tqdm(docs, desc="Preparing docs", unit="doc"):
-            db_docs.append(
-                Document(
-                    title=doc.title,
-                    petitioner=doc.petitioner,
-                    respondent=doc.respondent,
-                    judge=doc.judge,
-                    citation=doc.citation,
-                    decision_date=doc.decision_date,
-                    court=doc.court,
-                    case_id=doc.case_id,
-                    content=doc.text_content,
-                    display_content=doc.display_html,
-                    is_gst_core=doc.is_gst_core,
-                    extracted_provisions=doc.extracted_provisions,
-                    extracted_statutes=doc.extracted_statutes,
-                )
-            )
-
-        db.bulk_save_objects(db_docs, return_defaults=True)
-        db.flush()
-
-        # Get IDs
-        doc_id_map = {
-            r[0]: r[1]
-            for r in db.execute(
-                text("SELECT case_id, id FROM documents WHERE case_id = ANY(:ids)"),
-                {"ids": case_ids},
-            ).fetchall()
-        }
-
-        # Bulk insert chunks
-        logger.info("Inserting chunks...")
-        db_chunks = []
-        for doc in tqdm(docs, desc="Preparing chunks", unit="doc"):
-            doc_id = doc_id_map.get(doc.case_id)
-            if doc_id:
-                for chunk_text, embedding in zip(doc.chunks, doc.embeddings):
-                    db_chunks.append(
-                        DocumentChunk(
-                            document_id=doc_id, chunk_content=chunk_text, embedding=embedding
-                        )
-                    )
-
-        logger.info(f"Inserting {len(db_chunks)} chunks...")
-
-        # Insert chunks in batches to avoid memory issues
-        batch_size = 5000
-        for i in tqdm(range(0, len(db_chunks), batch_size), desc="Chunk batches", unit="batch"):
-            batch = db_chunks[i : i + batch_size]
-            db.bulk_save_objects(batch)
-            db.flush()
-
-        db.commit()
-
-    logger.info("Database insert complete")
-
-
 def load_sc_metadata(metadata_dir: str) -> list[dict]:
     """Load and deduplicate SC metadata from parquet files."""
     files = [
@@ -656,7 +446,6 @@ def load_sc_metadata(metadata_dir: str) -> list[dict]:
         df = pd.read_parquet(os.path.join(metadata_dir, file), columns=KEEP_COLUMNS)
         all_records.extend(df.to_dict(orient="records"))
 
-    # Deduplicate by citation
     seen = set()
     unique = []
     for record in all_records:
@@ -673,98 +462,29 @@ def load_sc_metadata(metadata_dir: str) -> list[dict]:
 load_metadata = load_sc_metadata
 
 
-def _load_env_file() -> dict[str, str]:
-    """Load key=value pairs from the staging env file (no dependencies needed)."""
-    project_root = Path(__file__).resolve().parent.parent
-    env = os.getenv("ENVIRONMENT", "staging")
-    env_path = project_root / "envs" / f".env.{env}"
-    if not env_path.exists():
-        env_path = project_root / "envs" / ".env.staging"
-    if not env_path.exists():
-        return {}
-
-    vals: dict[str, str] = {}
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        # Strip surrounding quotes
-        value = value.strip().strip("'\"")
-        # Skip placeholders
-        if value.startswith("<") or value.startswith("${"):
-            continue
-        vals[key.strip()] = value
-    return vals
-
-
-def _build_db_url_from_env() -> str:
-    """Construct DATABASE_URL from POSTGRES_* env vars, falling back to the env file."""
-    from urllib.parse import quote_plus
-
-    env_file = _load_env_file()
-
-    def _get(key: str, default: str = "") -> str:
-        return os.getenv(key) or env_file.get(key, default)
-
-    user = _get("POSTGRES_USER")
-    password = _get("POSTGRES_PASSWORD")
-    db = _get("POSTGRES_DB", "search_db")
-    port = _get("DB_PORT", "5432")
-
-    if not user or not password:
-        raise RuntimeError(
-            "Cannot build DATABASE_URL: POSTGRES_USER and POSTGRES_PASSWORD are required.\n"
-            "Either:\n"
-            "  1. Set DATABASE_URL directly, or\n"
-            "  2. Source your env file: set -a; source envs/.env.staging; set +a\n"
-            "  3. Ensure envs/.env.staging exists with POSTGRES_USER and POSTGRES_PASSWORD set"
-        )
-
-    url = f"postgresql://{quote_plus(user)}:{quote_plus(password)}@localhost:{port}/{db}"
-    logger.info(f"Constructed DATABASE_URL from env vars (db={db}, port={port})")
-    return url
-
-
 def run_pipeline(
     metadata_dir: str,
     judgments_dir: str,
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-    db_url: str | None = None,
     limit: int = 0,
     skip_filter: bool = False,
-    use_onnx: bool = False,
     court_type: str = "all",
     years: list[int] | None = None,
     export_after_filter_dir: str | None = None,
     import_filtered_dir: str | None = None,
 ) -> int:
-    """Run the optimized pipeline - processes everything in one go.
+    """Run the pipeline: shard → filter → persist PDFs [→ export].
 
     Args:
         metadata_dir: Directory containing parquet metadata files
         judgments_dir: Directory containing judgment zip/tar files
-        model_name: Embedding model name
-        db_url: Database connection URL
         limit: Limit number of records (0 = no limit)
         skip_filter: Skip NER filtering
-        use_onnx: Use ONNX Runtime for embeddings (2-4x faster on CPU)
         court_type: Which courts to process - "sc", "hc", or "all"
         years: Optional list of years to filter (applies to HC loading)
         export_after_filter_dir: If set, export filtered docs to this dir and stop
-        import_filtered_dir: If set, import docs from this dir and skip Steps 1-3
+        import_filtered_dir: If set, import docs from this dir (skip Steps 1-3)
     """
-    try:
-        from backend.app.chunk_generator import RecursiveCharacterTextSplitter
-    except ImportError:
-        from app.chunk_generator import RecursiveCharacterTextSplitter  # type: ignore[no-redef]
-
-    if db_url is None:
-        db_url = os.getenv("DATABASE_URL") or _build_db_url_from_env()
-
-    # === IMPORT MODE: Skip Steps 1-3, load from exported data ===
+    # === IMPORT MODE: Skip Steps 1-3, load from previously exported data ===
     if import_filtered_dir:
         logger.info("=" * 50)
         logger.info(f"IMPORT MODE: Loading filtered docs from {import_filtered_dir}")
@@ -774,122 +494,78 @@ def run_pipeline(
             logger.error("No documents found in import directory!")
             return 0
         persist_filtered_pdfs(docs, ".data/gst_pdfs")
-    else:
-        # === STEP 1: Load metadata ===
+        return len(docs)
+
+    # === STEP 1: Load metadata ===
+    logger.info("=" * 50)
+    logger.info(f"STEP 1: Loading metadata (court_type={court_type})")
+    logger.info("=" * 50)
+
+    sc_records: list[dict] = []
+    hc_records: list[dict] = []
+
+    if court_type in ("sc", "all"):
+        sc_records = load_sc_metadata(metadata_dir)
+    if court_type in ("hc", "all"):
+        hc_records = load_hc_metadata(metadata_dir, years=years)
+
+    total_records = len(sc_records) + len(hc_records)
+    logger.info(f"Total records: {total_records} (SC: {len(sc_records)}, HC: {len(hc_records)})")
+
+    if limit > 0:
+        sc_records = sc_records[:limit]
+        hc_records = hc_records[: max(0, limit - len(sc_records))]
+        logger.info(f"Limited to {len(sc_records) + len(hc_records)} records")
+
+    # === STEP 2: Parallel PDF extraction ===
+    logger.info("=" * 50)
+    logger.info("STEP 2: Extracting PDFs (parallel)")
+    logger.info("=" * 50)
+
+    docs = []
+    if sc_records:
+        logger.info(f"Extracting {len(sc_records)} SC documents from zips...")
+        docs.extend(parallel_extract_from_zips(sc_records, judgments_dir))
+    if hc_records:
+        logger.info(f"Extracting {len(hc_records)} HC documents from tars...")
+        docs.extend(parallel_extract_from_tars(hc_records, judgments_dir))
+
+    if not docs:
+        logger.error("No documents extracted!")
+        return 0
+
+    # === STEP 3: NER Filter (batch processing) ===
+    if not skip_filter:
         logger.info("=" * 50)
-        logger.info(f"STEP 1: Loading metadata (court_type={court_type})")
+        logger.info("STEP 3: NER Filtering (two-stage)")
         logger.info("=" * 50)
+        nlp = load_ner_model()
+        docs = batch_ner_filter(docs, nlp)
+        del nlp  # Free memory
 
-        sc_records: list[dict] = []
-        hc_records: list[dict] = []
-
-        if court_type in ("sc", "all"):
-            sc_records = load_sc_metadata(metadata_dir)
-        if court_type in ("hc", "all"):
-            hc_records = load_hc_metadata(metadata_dir, years=years)
-
-        total_records = len(sc_records) + len(hc_records)
-        logger.info(f"Total records: {total_records} (SC: {len(sc_records)}, HC: {len(hc_records)})")
-
-        if limit > 0:
-            sc_records = sc_records[:limit]
-            hc_records = hc_records[: max(0, limit - len(sc_records))]
-            logger.info(f"Limited to {len(sc_records) + len(hc_records)} records")
-
-        # === STEP 2: Parallel PDF extraction ===
-        logger.info("=" * 50)
-        logger.info("STEP 2: Extracting PDFs (parallel)")
-        logger.info("=" * 50)
-
-        docs = []
-        if sc_records:
-            logger.info(f"Extracting {len(sc_records)} SC documents from zips...")
-            docs.extend(parallel_extract_from_zips(sc_records, judgments_dir))
-        if hc_records:
-            logger.info(f"Extracting {len(hc_records)} HC documents from tars...")
-            docs.extend(parallel_extract_from_tars(hc_records, judgments_dir))
+        persist_filtered_pdfs(docs, ".data/gst_pdfs")
 
         if not docs:
-            logger.error("No documents extracted!")
+            logger.error("No GST-relevant documents found!")
             return 0
-
-        # === STEP 3: NER Filter (batch processing) ===
-        if not skip_filter:
-            logger.info("=" * 50)
-            logger.info("STEP 3: NER Filtering (two-stage)")
-            logger.info("=" * 50)
-            nlp = load_ner_model()
-            all_docs = docs
-            docs = batch_ner_filter(docs, nlp)
-            del nlp  # Free memory
-
-            persist_filtered_pdfs(docs, ".data/gst_pdfs")
-            del all_docs
-
-            if not docs:
-                logger.error("No GST-relevant documents found!")
-                return 0
-        else:
-            logger.info("STEP 3: Skipping NER filter")
-            for doc in docs:
-                doc.is_gst_core = True
-
-            # All docs pass when filter is skipped
-            persist_filtered_pdfs(docs, ".data/gst_pdfs")
-
-        # === EXPORT MODE: Save filtered docs and stop ===
-        if export_after_filter_dir:
-            logger.info("=" * 50)
-            logger.info(f"EXPORT MODE: Saving filtered docs to {export_after_filter_dir}")
-            logger.info("=" * 50)
-            count = export_after_filter(docs, export_after_filter_dir)
-            logger.info(f"Exported {count} documents. Pipeline stopping after filter stage.")
-            return count
-
-    # === STEP 4: PDF to HTML (parallel) ===
-    logger.info("=" * 50)
-    logger.info("STEP 4: Converting PDFs to HTML (parallel)")
-    logger.info("=" * 50)
-    docs = parallel_convert_pdfs(docs)
-
-    # Clean up HC staging directory (PDFs already converted or discarded)
-    # Skip in import mode — staging dir belongs to export, not this run
-    if not import_filtered_dir:
-        staging_dir = ".data/staging/hc_pdfs"
-        if os.path.isdir(staging_dir):
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            logger.info("Cleaned up HC PDF staging directory")
-
-    # === STEP 5: Chunk and embed (batch) ===
-    logger.info("=" * 50)
-    logger.info("STEP 5: Chunking and embedding")
-    logger.info("=" * 50)
-
-    embed_model: Any
-    if use_onnx:
-        logger.info(f"Using ONNX Runtime for embeddings (model: {model_name})")
-        embed_model = ONNXEmbedder(model_name)
     else:
-        from app.embeddings import EmbeddingModel  # type: ignore[no-redef]
+        logger.info("STEP 3: Skipping NER filter")
+        for doc in docs:
+            doc.is_gst_core = True
+        persist_filtered_pdfs(docs, ".data/gst_pdfs")
 
-        logger.info(f"Loading embedding model: {model_name}")
-        embed_model = EmbeddingModel(model_name)
-
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=4000, chunk_overlap=600, separators=["\n\n", "\n", ".", " ", ""]
-    )
-
-    docs = batch_chunk_and_embed(docs, embed_model, text_splitter)
-    del embed_model  # Free memory
-
-    # === STEP 6: Database insert (bulk) ===
-    logger.info("=" * 50)
-    logger.info("STEP 6: Database insert")
-    logger.info("=" * 50)
-    bulk_insert_to_db(docs, db_url)
+    # === EXPORT MODE: Save filtered docs and stop ===
+    if export_after_filter_dir:
+        logger.info("=" * 50)
+        logger.info(f"EXPORT MODE: Saving filtered docs to {export_after_filter_dir}")
+        logger.info("=" * 50)
+        count = export_after_filter(docs, export_after_filter_dir)
+        logger.info(f"Exported {count} documents. Pipeline stopping after filter stage.")
+        return count
 
     logger.info("=" * 50)
-    logger.info(f"PIPELINE COMPLETE: {len(docs)} documents ingested")
+    logger.info(f"PIPELINE COMPLETE: {len(docs)} documents filtered and persisted to .data/gst_pdfs")
+    logger.info("Next step: run etl/ingest.py with the LLM analysis JSONs to load into the database.")
     logger.info("=" * 50)
 
     return len(docs)
@@ -897,16 +573,12 @@ def run_pipeline(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fast unified pipeline for LegalSearch (V3 with Tier 1 optimizations)"
+        description="LegalSearch pipeline: shard → NER filter → persist PDFs"
     )
     parser.add_argument("--metadata-dir", default=".data/metadata/raw")
     parser.add_argument("--judgments-dir", default=".data/GST_judgments")
-    parser.add_argument("--model-name", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--skip-filter", action="store_true", help="Skip NER filtering")
-    parser.add_argument(
-        "--use-onnx", action="store_true", help="Use ONNX Runtime for faster embeddings"
-    )
     parser.add_argument(
         "--court-type",
         choices=["sc", "hc", "all"],
@@ -935,7 +607,7 @@ def main():
     parser.add_argument(
         "--import-filtered",
         action="store_true",
-        help="Skip Steps 1-3, import previously exported docs, run Steps 4-6",
+        help="Skip Steps 1-3, import previously exported docs, persist PDFs",
     )
     parser.add_argument(
         "--import-dir",
@@ -951,10 +623,8 @@ def main():
     run_pipeline(
         metadata_dir=args.metadata_dir,
         judgments_dir=args.judgments_dir,
-        model_name=args.model_name,
         limit=args.limit,
         skip_filter=args.skip_filter,
-        use_onnx=args.use_onnx,
         court_type=args.court_type,
         years=args.years,
         export_after_filter_dir=args.export_dir if args.export_after_filter else None,

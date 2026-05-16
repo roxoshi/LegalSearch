@@ -20,19 +20,25 @@ if TYPE_CHECKING:
 
 # GST-related keywords for fast pre-filtering
 # These are checked BEFORE expensive NER inference
-GST_KEYWORDS: frozenset[str] = frozenset(
-    [
-        "goods and services",
-        "goods & services"
-    ]
-)
+GST_KEYWORDS: frozenset[str] = frozenset([
+    "goods and services",
+    "goods & services",
+    "hsn code",
+    "reverse charge",
+    "composition scheme",
+])
 
 # Regex patterns for more flexible matching
 GST_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\bg\.?s\.?t\.?\b", re.IGNORECASE),  # G.S.T., GST, g.s.t
-    re.compile(r"\bc\.?g\.?s\.?t\.?\b", re.IGNORECASE),  # CGST variants
-    re.compile(r"\bs\.?g\.?s\.?t\.?\b", re.IGNORECASE),  # SGST variants
-    re.compile(r"\bi\.?g\.?s\.?t\.?\b", re.IGNORECASE),  # IGST variants
+    # Matches GST in any form: standalone (GST, gst, G.S.T.), compound with uppercase
+    # prefix (CGST, SGST, IGST, WBGST, UPGST, UTGST, etc.), and GSTR-1/3B forms.
+    # Word boundary \b prevents matching 'gst' inside lowercase words like 'gangster'
+    # or 'Kingston'. [A-Z]{0,4} captures the uppercase prefix so CGST/WBGST are
+    # returned as full tokens (not just "GST").
+    re.compile(r"\b[A-Z]{0,4}(?i:g\.?s\.?t)\.?(?![a-z])"),
+    re.compile(r"\bitc\b", re.IGNORECASE),                           # ITC abbreviation
+    re.compile(r"\binput\s+tax\s+credit\b", re.IGNORECASE),
+    re.compile(r"\be-?way\s+bill\b", re.IGNORECASE),
     re.compile(r"goods\s+(?:and|&)\s+services?\s+tax", re.IGNORECASE),
     re.compile(r"section\s+\d+\s+of\s+(?:the\s+)?(?:c|s|i)?gst", re.IGNORECASE),
 ]
@@ -64,10 +70,9 @@ def keyword_prefilter(text: str | None) -> tuple[bool, set[str]]:
         if keyword in text_lower:
             matched.add(keyword)
 
-    # Check regex patterns
+    # Check regex patterns — finditer to capture all distinct compounds (CGST, IGST, etc.)
     for pattern in GST_PATTERNS:
-        match = pattern.search(text)
-        if match:
+        for match in pattern.finditer(text):
             matched.add(match.group().lower())
 
     return len(matched) > 0, matched
@@ -306,7 +311,7 @@ def two_stage_filter(
 
     # Stage 1: Keyword pre-filter (uses full max_chars — just string matching)
     candidates: list[DocT] = []
-    rejected_early = 0
+    keyword_rejects: list[DocT] = []
 
     for doc in tqdm(docs, desc="Keyword Pre-filter", unit="doc"):
         text = text_getter(doc)
@@ -315,13 +320,14 @@ def two_stage_filter(
         if is_candidate:
             candidates.append(doc)
         else:
-            rejected_early += 1
+            keyword_rejects.append(doc)
 
     stats: dict[str, Any] = {
         "total": len(docs),
         "passed_keyword_filter": len(candidates),
-        "rejected_by_keyword": rejected_early,
-        "keyword_filter_rate": rejected_early / len(docs) if docs else 0,
+        "rejected_by_keyword": len(keyword_rejects),
+        "keyword_rejects": keyword_rejects,  # clean negatives for classifier training
+        "keyword_filter_rate": len(keyword_rejects) / len(docs) if docs else 0,
     }
 
     if not candidates:
@@ -334,7 +340,22 @@ def two_stage_filter(
     # + all spaCy Docs are materialized at once, causing OOM on large datasets.
     NER_CHUNK_SIZE = 500
 
-    gst_statutes_keywords = ["goods and services", "goods & services", "gst"]
+    gst_statutes_keywords = ["goods and services", "goods & services", "gst", "utgst"]
+
+    # High-confidence GST text patterns used as fallback when NER misses the statute.
+    # NER models sometimes fail to tag statute names (e.g. "WBGST Act", "CGST Act")
+    # even when the document is clearly a GST case. These patterns are specific enough
+    # to not increase false positives meaningfully.
+    _gst_fallback_patterns = [
+        re.compile(r"\b(?:wb|mh|tn|ka|up|rj|ap|ts|or|br|dl|gj|hr|hp|jk|jh|ke|mp|mn|ml|mz|nl|pb|sk|tr|ut|as|cg|ga|ar|n[la])\s*gst\b", re.IGNORECASE),  # state GST abbreviations
+        re.compile(r"\bcgst\s+act\b", re.IGNORECASE),
+        re.compile(r"\bsgst\s+act\b", re.IGNORECASE),
+        re.compile(r"\bigst\s+act\b", re.IGNORECASE),
+        re.compile(r"\bgstr[-\s]?\d\b", re.IGNORECASE),  # GSTR-1, GSTR-2A, GSTR-3B etc.
+        re.compile(r"\binput\s+tax\s+credit\b", re.IGNORECASE),
+        re.compile(r"\be-?way\s+bill\b", re.IGNORECASE),
+        re.compile(r"\bstate\s+(?:goods\s+and\s+services|gst)\s+(?:tax\s+)?act\b", re.IGNORECASE),
+    ]
 
     filtered: list[DocT] = []
 
@@ -343,9 +364,10 @@ def two_stage_filter(
             chunk_docs = candidates[chunk_start : chunk_start + NER_CHUNK_SIZE]
             chunk_texts = [text_getter(doc)[:ner_max_chars] for doc in chunk_docs]
 
-            for doc, spacy_doc in zip(
+            for doc, spacy_doc, chunk_text in zip(
                 chunk_docs,
                 nlp.pipe(chunk_texts, batch_size=ner_batch_size, n_process=1),
+                chunk_texts,
             ):
                 provisions: set[str] = set()
                 statutes: set[str] = set()
@@ -360,7 +382,15 @@ def two_stage_filter(
                 doc.extracted_statutes = sorted(statutes)  # type: ignore[attr-defined]
 
                 statutes_text = " ".join(statutes).lower()
-                doc.is_gst_core = any(kw in statutes_text for kw in gst_statutes_keywords)  # type: ignore[attr-defined]
+                ner_matched = any(kw in statutes_text for kw in gst_statutes_keywords)
+
+                # Fallback: NER missed the statute but high-confidence text patterns present
+                fallback_matched = (
+                    not ner_matched
+                    and any(p.search(chunk_text) for p in _gst_fallback_patterns)
+                )
+
+                doc.is_gst_core = ner_matched or fallback_matched  # type: ignore[attr-defined]
 
                 if doc.is_gst_core:  # type: ignore[attr-defined]
                     filtered.append(doc)

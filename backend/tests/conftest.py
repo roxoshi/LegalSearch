@@ -6,7 +6,7 @@ from sqlalchemy.exc import CompileError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Document, DocumentChunk
+from app.models import Act, Circular, CrossReference, DocType, Document, DocumentChunk, Notification, Rule
 
 
 @pytest.fixture(scope="function")
@@ -153,3 +153,105 @@ def postgres_sample_chunk(postgres_db, postgres_sample_document):
     postgres_db.commit()
     postgres_db.refresh(chunk)
     return chunk
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Library fixtures (require PostgreSQL via postgres_db)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def library_act(postgres_db):
+    row = Act(
+        primary_id=9001,
+        content_id=1111900001,
+        act_name="CGST Act",
+        chapter_no="Chapter I",
+        chapter_name="Preliminary",
+        section_no="Section 1",
+        section_name="Short title",
+        content="This Act may be called the CGST Act.",
+        html_content="<p>This Act may be called the CGST Act.</p>",
+        source_url="https://example.com/cgst/s1",
+    )
+    postgres_db.add(row)
+    postgres_db.commit()
+    postgres_db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def library_rule(postgres_db):
+    row = Rule(
+        primary_id=9002,
+        content_id=1220900002,
+        act_name="CGST Rules",
+        chapter_id=1,
+        section_no="Rule 1",
+        section_name="Short title",
+        content="These rules may be called the CGST Rules.",
+        html_content="<p>These rules may be called the CGST Rules.</p>",
+        source_url="https://example.com/cgst-rules/r1",
+    )
+    postgres_db.add(row)
+    postgres_db.commit()
+    postgres_db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def library_notification(postgres_db):
+    from datetime import datetime, timezone
+    row = Notification(
+        primary_id=9003,
+        content_id=1500900003,
+        notification_no="01/2017-CT",
+        issued_on=datetime(2017, 6, 19, tzinfo=timezone.utc),
+        title="Notification on commencement",
+        content="In exercise of powers under CGST Act...",
+        category="Central Tax",
+        year=2017,
+        is_active=True,
+        is_amended=False,
+    )
+    postgres_db.add(row)
+    postgres_db.commit()
+    postgres_db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def library_circular(postgres_db):
+    from datetime import datetime, timezone
+    row = Circular(
+        primary_id=9004,
+        content_id=1600900004,
+        circular_no="1/1/2017",
+        issued_on=datetime(2017, 9, 26, tzinfo=timezone.utc),
+        subject="Issues related to furnishing of Bond/LUT",
+        content="Various representations have been received...",
+        category="CGST",
+        year=2017,
+        is_active=True,
+        is_amended=False,
+    )
+    postgres_db.add(row)
+    postgres_db.commit()
+    postgres_db.refresh(row)
+    return row
+
+
+@pytest.fixture
+def library_cross_ref(postgres_db, library_act, library_notification):
+    """A cross-reference from library_act → library_notification."""
+    row = CrossReference(
+        source_type=DocType.act,
+        source_id=library_act.primary_id,
+        target_type=DocType.notification,
+        target_id=library_notification.primary_id,
+        anchor_text="Notification 01/2017",
+    )
+    postgres_db.add(row)
+    postgres_db.commit()
+    postgres_db.refresh(row)
+    return row
